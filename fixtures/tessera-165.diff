@@ -1,0 +1,2770 @@
+diff --git a/apps/api/src/modules/github-import/application/github-import.service.spec.ts b/apps/api/src/modules/github-import/application/github-import.service.spec.ts
+index bfe7525f..1da8a183 100644
+--- a/apps/api/src/modules/github-import/application/github-import.service.spec.ts
++++ b/apps/api/src/modules/github-import/application/github-import.service.spec.ts
+@@ -133,7 +133,7 @@ describe(GitHubImportService.name, () => {
+ 		vi.clearAllMocks()
+ 	})
+ 
+-	test('lists GitHub repositories with a stored GitHub access token', async () => {
++	test('passes pagination and search to GitHub and returns the result as-is', async () => {
+ 		const findGitHubAccountSpy = vi
+ 			.spyOn(githubImportRepository, 'findGitHubAccount')
+ 			.mockResolvedValue({
+@@ -143,14 +143,19 @@ describe(GitHubImportService.name, () => {
+ 			})
+ 		const listRepositoriesSpy = vi
+ 			.spyOn(githubOctokitClient, 'listRepositories')
+-			.mockResolvedValue([repository])
++			.mockResolvedValue({ repositories: [repository], nextPage: 2 })
+ 
+-		expect(await githubImportService.listRepositories(mockUserId)).toEqual([
+-			repository,
+-		])
++		expect(
++			await githubImportService.listRepositories(mockUserId, {
++				page: 2,
++				search: 'ludus',
++			})
++		).toEqual({ repositories: [repository], nextPage: 2 })
+ 		expect(findGitHubAccountSpy).toHaveBeenCalledWith({ userId: mockUserId })
+ 		expect(listRepositoriesSpy).toHaveBeenCalledWith({
+ 			accessToken: 'github-token',
++			page: 2,
++			search: 'ludus',
+ 		})
+ 	})
+ 
+@@ -160,9 +165,13 @@ describe(GitHubImportService.name, () => {
+ 			scope: 'repo',
+ 			accessTokenExpiresAt: null,
+ 		})
+-		vi.spyOn(githubOctokitClient, 'listRepositories').mockResolvedValue([])
++		vi.spyOn(githubOctokitClient, 'listRepositories').mockResolvedValue({
++			repositories: [],
++		})
+ 
+-		expect(await githubImportService.listRepositories(mockUserId)).toEqual([])
++		expect(
++			await githubImportService.listRepositories(mockUserId, { page: 1 })
++		).toEqual({ repositories: [] })
+ 	})
+ 
+ 	test('rejects when the user has no GitHub account', async () => {
+@@ -171,7 +180,7 @@ describe(GitHubImportService.name, () => {
+ 		)
+ 
+ 		await expect(
+-			githubImportService.listRepositories(mockUserId)
++			githubImportService.listRepositories(mockUserId, { page: 1 })
+ 		).rejects.toBeInstanceOf(GitHubImportAuthenticationError)
+ 		expect(githubOctokitClient.listRepositories).not.toHaveBeenCalled()
+ 	})
+@@ -184,7 +193,7 @@ describe(GitHubImportService.name, () => {
+ 		})
+ 
+ 		await expect(
+-			githubImportService.listRepositories(mockUserId)
++			githubImportService.listRepositories(mockUserId, { page: 1 })
+ 		).rejects.toBeInstanceOf(GitHubImportAuthenticationError)
+ 		expect(githubOctokitClient.listRepositories).not.toHaveBeenCalled()
+ 	})
+@@ -197,7 +206,7 @@ describe(GitHubImportService.name, () => {
+ 		})
+ 
+ 		await expect(
+-			githubImportService.listRepositories(mockUserId)
++			githubImportService.listRepositories(mockUserId, { page: 1 })
+ 		).rejects.toBeInstanceOf(GitHubImportAuthenticationError)
+ 		expect(githubOctokitClient.listRepositories).not.toHaveBeenCalled()
+ 	})
+@@ -210,13 +219,14 @@ describe(GitHubImportService.name, () => {
+ 		})
+ 		const listRepositoriesSpy = vi
+ 			.spyOn(githubOctokitClient, 'listRepositories')
+-			.mockResolvedValue([repository])
++			.mockResolvedValue({ repositories: [repository] })
+ 
+-		expect(await githubImportService.listRepositories(mockUserId)).toEqual([
+-			repository,
+-		])
++		expect(
++			await githubImportService.listRepositories(mockUserId, { page: 1 })
++		).toEqual({ repositories: [repository] })
+ 		expect(listRepositoriesSpy).toHaveBeenCalledWith({
+ 			accessToken: 'github-token',
++			page: 1,
+ 		})
+ 	})
+ 
+@@ -228,13 +238,14 @@ describe(GitHubImportService.name, () => {
+ 		})
+ 		const listRepositoriesSpy = vi
+ 			.spyOn(githubOctokitClient, 'listRepositories')
+-			.mockResolvedValue([repository])
++			.mockResolvedValue({ repositories: [repository] })
+ 
+-		expect(await githubImportService.listRepositories(mockUserId)).toEqual([
+-			repository,
+-		])
++		expect(
++			await githubImportService.listRepositories(mockUserId, { page: 1 })
++		).toEqual({ repositories: [repository] })
+ 		expect(listRepositoriesSpy).toHaveBeenCalledWith({
+ 			accessToken: 'github-token',
++			page: 1,
+ 		})
+ 	})
+ 
+diff --git a/apps/api/src/modules/github-import/application/github-import.service.ts b/apps/api/src/modules/github-import/application/github-import.service.ts
+index 6ca99ae3..a8b8f934 100644
+--- a/apps/api/src/modules/github-import/application/github-import.service.ts
++++ b/apps/api/src/modules/github-import/application/github-import.service.ts
+@@ -6,8 +6,10 @@ import { Injectable } from '@nestjs/common'
+ import type {
+ 	CreateGitHubRepositoryImportInput,
+ 	GetGitHubRepositoryImportInput,
++	GitHubImportRepositoriesOutput,
+ 	GitHubImportRepository,
+ 	GitHubRepositoryImport,
++	ParsedListGitHubImportRepositoriesInput,
+ } from '@repo/contracts'
+ import type { RepositoryImportId } from '@repo/db'
+ import type { RepositorySlug, UserId } from '@repo/domain'
+@@ -46,11 +48,15 @@ export class GitHubImportService {
+ 		private readonly githubImportQueue: GitHubImportQueue
+ 	) {}
+ 
+-	async listRepositories(userId: UserId): Promise<GitHubImportRepository[]> {
++	async listRepositories(
++		userId: UserId,
++		input: ParsedListGitHubImportRepositoriesInput
++	): Promise<GitHubImportRepositoriesOutput> {
+ 		const account = await this.requireGitHubAccount(userId)
+ 
+ 		return await this.githubOctokitClient.listRepositories({
+ 			accessToken: account.accessToken,
++			...input,
+ 		})
+ 	}
+ 
+diff --git a/apps/api/src/modules/github-import/infrastructure/github-octokit.client.spec.ts b/apps/api/src/modules/github-import/infrastructure/github-octokit.client.spec.ts
+index d3555df6..cab68144 100644
+--- a/apps/api/src/modules/github-import/infrastructure/github-octokit.client.spec.ts
++++ b/apps/api/src/modules/github-import/infrastructure/github-octokit.client.spec.ts
+@@ -18,34 +18,36 @@ const repository: GitHubImportRepository = {
+ 	githubUrl: 'https://github.com/marta/tessera',
+ }
+ 
+-const githubRepositoryResponse = {
+-	id: 123,
+-	owner: {
+-		login: 'marta',
+-	},
+-	name: 'tessera',
+-	full_name: 'marta/tessera',
+-	visibility: 'private' as const,
+-	private: true,
+-	default_branch: 'main',
+-	pushed_at: '2026-05-10T12:34:56Z',
+-	html_url: 'https://github.com/marta/tessera',
++const NEXT_PAGE_LINK = '<https://api.github.com/user/repos?page=2>; rel="next"'
++
++function githubRepositoryResponse(id: number, fullName: string) {
++	const [ownerLogin = 'marta', name = 'tessera'] = fullName.split('/')
++
++	return {
++		id,
++		owner: { login: ownerLogin },
++		name,
++		full_name: fullName,
++		visibility: 'private' as const,
++		private: true,
++		default_branch: 'main',
++		pushed_at: '2026-05-10T12:34:56Z',
++		html_url: `https://github.com/${fullName}`,
++	}
+ }
+ 
+ describe(GitHubOctokitClient.name, () => {
+ 	let githubOctokitClient: GitHubOctokitClient
+-	let paginate: ReturnType<typeof vi.fn>
++	let listForAuthenticatedUser: ReturnType<typeof vi.fn>
+ 	let request: ReturnType<typeof vi.fn>
+-	const listForAuthenticatedUser = vi.fn()
+ 
+ 	beforeEach(() => {
+ 		vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+ 		vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+-		paginate = vi.fn()
++		listForAuthenticatedUser = vi.fn()
+ 		request = vi.fn()
+ 		githubOctokitClient = new GitHubOctokitClient()
+ 		vi.spyOn(githubOctokitClient, 'createForUser').mockReturnValue({
+-			paginate,
+ 			request,
+ 			rest: {
+ 				repos: {
+@@ -59,95 +61,219 @@ describe(GitHubOctokitClient.name, () => {
+ 		vi.clearAllMocks()
+ 	})
+ 
+-	test('lists repositories with the authenticated GitHub user client', async () => {
+-		paginate.mockImplementation((_endpoint, _options, mapPage) => {
+-			const done = vi.fn()
+-			const repositories = mapPage({ data: [githubRepositoryResponse] }, done)
+-
+-			expect(done).toHaveBeenCalled()
+-
+-			return repositories
++	test('lists one requested page with the authenticated GitHub user client', async () => {
++		listForAuthenticatedUser.mockResolvedValue({
++			data: [githubRepositoryResponse(123, 'marta/tessera')],
++			headers: {},
+ 		})
+ 
+ 		expect(
+ 			await githubOctokitClient.listRepositories({
+ 				accessToken: 'github-token',
++				page: 3,
+ 			})
+-		).toEqual([repository])
++		).toEqual({ repositories: [repository], nextPage: undefined })
+ 		expect(githubOctokitClient.createForUser).toHaveBeenCalledWith(
+ 			'github-token'
+ 		)
+-		expect(paginate).toHaveBeenCalledWith(
+-			listForAuthenticatedUser,
+-			{
+-				visibility: 'all',
+-				sort: 'pushed',
+-				direction: 'desc',
+-				per_page: 100,
+-			},
+-			expect.any(Function)
+-		)
++		expect(listForAuthenticatedUser).toHaveBeenCalledOnce()
++		expect(listForAuthenticatedUser).toHaveBeenCalledWith({
++			visibility: 'all',
++			sort: 'pushed',
++			direction: 'desc',
++			per_page: 50,
++			page: 3,
++		})
+ 	})
+ 
+-	test('fetches a repository by string GitHub id without numeric coercion', async () => {
+-		request.mockResolvedValue({ data: githubRepositoryResponse })
++	test('continues after a full page and stops after a short page', async () => {
++		listForAuthenticatedUser.mockResolvedValueOnce({
++			data: Array.from({ length: 50 }, (_, index) =>
++				githubRepositoryResponse(index + 1, `marta/repository-${index + 1}`)
++			),
++			headers: { link: NEXT_PAGE_LINK },
++		})
+ 
+ 		expect(
+-			await githubOctokitClient.getRepository({
++			await githubOctokitClient.listRepositories({
+ 				accessToken: 'github-token',
+-				githubId: '9007199254740993',
++				page: 3,
+ 			})
+-		).toEqual(repository)
+-		expect(request).toHaveBeenCalledWith('GET /repositories/{repository_id}', {
+-			repository_id: '9007199254740993',
++		).toMatchObject({ nextPage: 4 })
++		expect(listForAuthenticatedUser).toHaveBeenCalledOnce()
++		listForAuthenticatedUser.mockClear()
++
++		listForAuthenticatedUser.mockResolvedValueOnce({
++			data: [githubRepositoryResponse(123, 'marta/tessera')],
++			headers: {},
+ 		})
++
++		expect(
++			await githubOctokitClient.listRepositories({
++				accessToken: 'github-token',
++				page: 4,
++			})
++		).toEqual({ repositories: [repository], nextPage: undefined })
++		expect(listForAuthenticatedUser).toHaveBeenCalledOnce()
+ 	})
+ 
+-	test('falls back to private visibility when GitHub omits visibility', async () => {
+-		paginate.mockResolvedValue([
+-			{
+-				...githubRepositoryResponse,
+-				visibility: undefined,
+-				private: true,
++	test('stops after a full page that GitHub marks as the last one', async () => {
++		listForAuthenticatedUser.mockResolvedValueOnce({
++			data: Array.from({ length: 50 }, (_, index) =>
++				githubRepositoryResponse(index + 1, `marta/repository-${index + 1}`)
++			),
++			headers: {
++				link: '<https://api.github.com/user/repos?page=1>; rel="prev"',
+ 			},
+-		])
++		})
+ 
+ 		expect(
+ 			await githubOctokitClient.listRepositories({
+ 				accessToken: 'github-token',
++				page: 2,
+ 			})
+-		).toEqual([repository])
++		).toMatchObject({ nextPage: undefined })
+ 	})
+ 
+-	test('maps GitHub 401 responses to an authentication error', async () => {
+-		paginate.mockRejectedValue({ status: 401 })
++	test('scans four search pages in parallel and stops at the first short page', async () => {
++		const pages = new Map([
++			[
++				2,
++				Array.from({ length: 50 }, (_, index) =>
++					githubRepositoryResponse(
++						index + 1,
++						index === 2 ? 'LUDUS/Engine' : `marta/repository-${index}`
++					)
++				),
++			],
++			[
++				3,
++				[
++					githubRepositoryResponse(100, 'marta/lUdUs-notes'),
++					githubRepositoryResponse(101, 'marta/other'),
++				],
++			],
++			[4, [githubRepositoryResponse(200, 'ludus/excluded')]],
++			[5, [githubRepositoryResponse(300, 'ludus/also-excluded')]],
++		])
++		const firstPage = Promise.withResolvers<{
++			data: ReturnType<typeof githubRepositoryResponse>[]
++			headers: Record<string, string>
++		}>()
++		listForAuthenticatedUser.mockImplementation(({ page }: { page: number }) =>
++			page === 2
++				? firstPage.promise
++				: Promise.resolve({ data: pages.get(page) ?? [], headers: {} })
++		)
++		const resultPromise = githubOctokitClient.listRepositories({
++			accessToken: 'github-token',
++			page: 2,
++			search: 'LuDuS',
++		})
+ 
+-		await expect(
+-			githubOctokitClient.listRepositories({ accessToken: 'github-token' })
+-		).rejects.toBeInstanceOf(GitHubImportAuthenticationError)
++		expect(listForAuthenticatedUser).toHaveBeenCalledTimes(4)
++		expect(
++			listForAuthenticatedUser.mock.calls.map(([input]) => input.page)
++		).toEqual([2, 3, 4, 5])
++		firstPage.resolve({ data: pages.get(2) ?? [], headers: {} })
++		expect(await resultPromise).toMatchObject({
++			repositories: [
++				expect.objectContaining({ fullName: 'LUDUS/Engine' }),
++				expect.objectContaining({ fullName: 'marta/lUdUs-notes' }),
++			],
++			nextPage: undefined,
++		})
+ 	})
+ 
+-	test('maps GitHub 403 responses to a forbidden error', async () => {
+-		paginate.mockRejectedValue({ status: 403 })
++	test('continues after four full search pages even with zero matches', async () => {
++		listForAuthenticatedUser.mockImplementation(({ page }: { page: number }) =>
++			Promise.resolve({
++				data: Array.from({ length: 50 }, (_, index) =>
++					githubRepositoryResponse(
++						page * 100 + index,
++						`marta/repository-${page}-${index}`
++					)
++				),
++				headers: { link: NEXT_PAGE_LINK },
++			})
++		)
+ 
+-		await expect(
+-			githubOctokitClient.listRepositories({ accessToken: 'github-token' })
+-		).rejects.toBeInstanceOf(GitHubImportForbiddenError)
++		expect(
++			await githubOctokitClient.listRepositories({
++				accessToken: 'github-token',
++				page: 3,
++				search: 'missing',
++			})
++		).toEqual({ repositories: [], nextPage: 7 })
+ 	})
+ 
+-	test('maps unexpected GitHub statuses to an external service error', async () => {
+-		paginate.mockRejectedValue({ status: 500 })
++	test('fetches a repository by string GitHub id without numeric coercion', async () => {
++		request.mockResolvedValue({
++			data: githubRepositoryResponse(123, 'marta/tessera'),
++		})
+ 
+-		await expect(
+-			githubOctokitClient.listRepositories({ accessToken: 'github-token' })
+-		).rejects.toBeInstanceOf(GitHubImportExternalServiceError)
++		expect(
++			await githubOctokitClient.getRepository({
++				accessToken: 'github-token',
++				githubId: '9007199254740993',
++			})
++		).toEqual(repository)
++		expect(request).toHaveBeenCalledWith('GET /repositories/{repository_id}', {
++			repository_id: '9007199254740993',
++		})
+ 	})
+ 
+-	test('maps GitHub request failures to an external service error', async () => {
+-		paginate.mockRejectedValue(new Error('socket closed'))
++	test('falls back to private visibility when GitHub omits visibility', async () => {
++		listForAuthenticatedUser.mockResolvedValue({
++			data: [
++				{
++					...githubRepositoryResponse(123, 'marta/tessera'),
++					visibility: undefined,
++					private: true,
++				},
++			],
++			headers: {},
++		})
++
++		expect(
++			await githubOctokitClient.listRepositories({
++				accessToken: 'github-token',
++				page: 1,
++			})
++		).toEqual({ repositories: [repository], nextPage: undefined })
++	})
++
++	test.each([
++		['401', { status: 401 }, GitHubImportAuthenticationError],
++		['403', { status: 403 }, GitHubImportForbiddenError],
++		['unexpected status', { status: 500 }, GitHubImportExternalServiceError],
++		[
++			'request failure',
++			new Error('socket closed'),
++			GitHubImportExternalServiceError,
++		],
++	])('maps a parallel %s rejection', async (_, error, ErrorClass) => {
++		listForAuthenticatedUser.mockImplementation(({ page }: { page: number }) =>
++			page === 3
++				? Promise.reject(error)
++				: Promise.resolve({
++						data: Array.from({ length: 50 }, (_, index) =>
++							githubRepositoryResponse(
++								page * 100 + index,
++								`marta/repository-${page}-${index}`
++							)
++						),
++						headers: {},
++					})
++		)
+ 
+ 		await expect(
+-			githubOctokitClient.listRepositories({ accessToken: 'github-token' })
+-		).rejects.toBeInstanceOf(GitHubImportExternalServiceError)
++			githubOctokitClient.listRepositories({
++				accessToken: 'github-token',
++				page: 1,
++				search: 'repository',
++			})
++		).rejects.toBeInstanceOf(ErrorClass)
++		expect(listForAuthenticatedUser).toHaveBeenCalledTimes(4)
+ 	})
+ })
+diff --git a/apps/api/src/modules/github-import/infrastructure/github-octokit.client.ts b/apps/api/src/modules/github-import/infrastructure/github-octokit.client.ts
+index 306b03db..d1517fe4 100644
+--- a/apps/api/src/modules/github-import/infrastructure/github-octokit.client.ts
++++ b/apps/api/src/modules/github-import/infrastructure/github-octokit.client.ts
+@@ -1,8 +1,10 @@
+ import { Injectable, Logger } from '@nestjs/common'
+ import { Octokit } from '@octokit/rest'
+ import type {
++	GitHubImportRepositoriesOutput,
+ 	GitHubImportRepository,
+ 	GitHubImportRepositoryVisibility,
++	ParsedListGitHubImportRepositoriesInput,
+ } from '@repo/contracts'
+ import {
+ 	GitHubImportAuthenticationError,
+@@ -10,14 +12,17 @@ import {
+ 	GitHubImportForbiddenError,
+ } from '../domain/github-import.errors'
+ 
+-const GITHUB_REPOSITORIES_PER_PAGE = 100
+-const GITHUB_REPOSITORIES_LIMIT = 100
++const GITHUB_REPOSITORIES_PER_PAGE = 50
++const GITHUB_SEARCH_SCAN_PAGES = 4
++const NEXT_PAGE_LINK_REGEX = /rel="next"/
+ 
+-interface ListRepositoriesParams {
++interface ListRepositoriesParams
++	extends ParsedListGitHubImportRepositoriesInput {
+ 	accessToken: string
+ }
+ 
+-interface GetRepositoryParams extends ListRepositoriesParams {
++interface GetRepositoryParams {
++	accessToken: string
+ 	githubId: string
+ }
+ 
+@@ -30,42 +35,62 @@ interface GitHubRepositoryVisibilityInput {
+ 	visibility?: string
+ }
+ 
++interface GitHubRepositoryInput extends GitHubRepositoryVisibilityInput {
++	id: number
++	owner: { login: string }
++	name: string
++	full_name: string
++	default_branch: string
++	pushed_at?: string | null
++	html_url: string
++}
++
+ @Injectable()
+ export class GitHubOctokitClient {
+ 	private readonly logger = new Logger(GitHubOctokitClient.name)
+ 
++	// GitHub's search API cannot see collaborator or org repositories, so search filters the plain listing.
+ 	async listRepositories({
+ 		accessToken,
+-	}: ListRepositoriesParams): Promise<GitHubImportRepository[]> {
++		page,
++		search,
++	}: ListRepositoriesParams): Promise<GitHubImportRepositoriesOutput> {
+ 		const octokit = this.createForUser(accessToken)
++		const pageCount = search ? GITHUB_SEARCH_SCAN_PAGES : 1
++		const term = search?.toLowerCase()
+ 
+ 		try {
+-			const repositories = await octokit.paginate(
+-				octokit.rest.repos.listForAuthenticatedUser,
+-				{
+-					visibility: 'all',
+-					sort: 'pushed',
+-					direction: 'desc',
+-					per_page: GITHUB_REPOSITORIES_PER_PAGE,
+-				},
+-				(response, done) => {
+-					done()
+-					return response.data.slice(0, GITHUB_REPOSITORIES_LIMIT)
+-				}
++			const responses = await Promise.all(
++				Array.from({ length: pageCount }, (_, index) =>
++					octokit.rest.repos.listForAuthenticatedUser({
++						visibility: 'all',
++						sort: 'pushed',
++						direction: 'desc',
++						per_page: GITHUB_REPOSITORIES_PER_PAGE,
++						page: page + index,
++					})
++				)
++			)
++			const pages = responses.map(response => response.data)
++			const shortPageIndex = pages.findIndex(
++				rows => rows.length < GITHUB_REPOSITORIES_PER_PAGE
+ 			)
++			const hasNextPage =
++				shortPageIndex === -1 &&
++				NEXT_PAGE_LINK_REGEX.test(responses.at(-1)?.headers.link ?? '')
+ 
+-			return repositories.map(repository => ({
+-				githubId: repository.id.toString(),
+-				ownerLogin: repository.owner.login,
+-				name: repository.name,
+-				fullName: repository.full_name,
+-				visibility: getRepositoryVisibility(repository),
+-				defaultBranch: repository.default_branch,
+-				pushedAt: repository.pushed_at
+-					? new Date(repository.pushed_at)
+-					: undefined,
+-				githubUrl: repository.html_url,
+-			}))
++			return {
++				repositories: (shortPageIndex === -1
++					? pages
++					: pages.slice(0, shortPageIndex + 1)
++				)
++					.flat()
++					.filter(
++						({ full_name }) => !term || full_name.toLowerCase().includes(term)
++					)
++					.map(toImportRepository),
++				nextPage: hasNextPage ? page + pageCount : undefined,
++			}
+ 		} catch (error) {
+ 			throw this.mapRepositoryRequestError(error, 'listing')
+ 		}
+@@ -85,18 +110,7 @@ export class GitHubOctokitClient {
+ 				}
+ 			)
+ 
+-			return {
+-				githubId: response.data.id.toString(),
+-				ownerLogin: response.data.owner.login,
+-				name: response.data.name,
+-				fullName: response.data.full_name,
+-				visibility: getRepositoryVisibility(response.data),
+-				defaultBranch: response.data.default_branch,
+-				pushedAt: response.data.pushed_at
+-					? new Date(response.data.pushed_at)
+-					: undefined,
+-				githubUrl: response.data.html_url,
+-			}
++			return toImportRepository(response.data)
+ 		} catch (error) {
+ 			throw this.mapRepositoryRequestError(error, 'fetching')
+ 		}
+@@ -150,6 +164,21 @@ function isGitHubRequestError(
+ 	return status === undefined || error.status === status
+ }
+ 
++function toImportRepository(
++	repository: GitHubRepositoryInput
++): GitHubImportRepository {
++	return {
++		githubId: repository.id.toString(),
++		ownerLogin: repository.owner.login,
++		name: repository.name,
++		fullName: repository.full_name,
++		visibility: getRepositoryVisibility(repository),
++		defaultBranch: repository.default_branch,
++		pushedAt: repository.pushed_at ? new Date(repository.pushed_at) : undefined,
++		githubUrl: repository.html_url,
++	}
++}
++
+ function getRepositoryVisibility({
+ 	private: isPrivate,
+ 	visibility,
+diff --git a/apps/api/src/modules/github-import/presentation/github-import.controller.spec.ts b/apps/api/src/modules/github-import/presentation/github-import.controller.spec.ts
+index 432349ae..0fde4447 100644
+--- a/apps/api/src/modules/github-import/presentation/github-import.controller.spec.ts
++++ b/apps/api/src/modules/github-import/presentation/github-import.controller.spec.ts
+@@ -65,19 +65,22 @@ describe(GitHubImportController.name, () => {
+ 	test('delegates list repository requests to the service', async () => {
+ 		const listRepositoriesSpy = vi
+ 			.spyOn(githubImportService, 'listRepositories')
+-			.mockResolvedValue([repository])
++			.mockResolvedValue({ repositories: [repository], nextPage: 6 })
+ 
+ 		expect(
+ 			await githubImportController.listRepositories(session)['~orpc'].handler({
+-				input: undefined,
++				input: { page: 2, search: 'ludus' },
+ 				context: {},
+ 				path: ['githubImport', 'listRepositories'],
+ 				procedure: githubImportController.listRepositories(session),
+ 				lastEventId: undefined,
+ 				errors: {},
+ 			})
+-		).toEqual({ repositories: [repository] })
+-		expect(listRepositoriesSpy).toHaveBeenCalledWith(mockUserId)
++		).toEqual({ repositories: [repository], nextPage: 6 })
++		expect(listRepositoriesSpy).toHaveBeenCalledWith(mockUserId, {
++			page: 2,
++			search: 'ludus',
++		})
+ 	})
+ 
+ 	test('delegates create import requests to the service', async () => {
+diff --git a/apps/api/src/modules/github-import/presentation/github-import.controller.ts b/apps/api/src/modules/github-import/presentation/github-import.controller.ts
+index 5c3062ec..08e44f1e 100644
+--- a/apps/api/src/modules/github-import/presentation/github-import.controller.ts
++++ b/apps/api/src/modules/github-import/presentation/github-import.controller.ts
+@@ -12,11 +12,8 @@ export class GitHubImportController {
+ 	@Implement(contract.githubImport.listRepositories)
+ 	listRepositories(@Session() session: UserSession) {
+ 		return implement(contract.githubImport.listRepositories).handler(
+-			async () => ({
+-				repositories: await this.githubImportService.listRepositories(
+-					session.user.id
+-				),
+-			})
++			({ input }) =>
++				this.githubImportService.listRepositories(session.user.id, input)
+ 		)
+ 	}
+ 
+diff --git a/apps/api/tests/integration/github-import.integration.spec.ts b/apps/api/tests/integration/github-import.integration.spec.ts
+index 97bf5ff4..73b31239 100644
+--- a/apps/api/tests/integration/github-import.integration.spec.ts
++++ b/apps/api/tests/integration/github-import.integration.spec.ts
+@@ -54,6 +54,7 @@ interface GitHubImportRepositoriesResponseBody {
+ 		pushedAt?: string
+ 		githubUrl: string
+ 	}[]
++	nextPage?: number
+ }
+ 
+ interface ErrorResponseBody {
+@@ -61,6 +62,7 @@ interface ErrorResponseBody {
+ 	code: string
+ 	status: number
+ 	message: string
++	data?: unknown
+ }
+ 
+ interface CreateIntegrationUserOptions {
+@@ -98,11 +100,35 @@ const privateRepository = {
+ 	private: true,
+ }
+ 
++function githubRepositoryResponse(id: number, fullName: string) {
++	const [ownerLogin = 'marta', name = 'repository'] = fullName.split('/')
++
++	return {
++		...publicRepository,
++		id,
++		owner: { login: ownerLogin },
++		name,
++		full_name: fullName,
++		html_url: `https://github.com/${fullName}`,
++	}
++}
++
++function fullGitHubRepositoryPage(page: number, matchingFullName?: string) {
++	return Array.from({ length: 50 }, (_, index) =>
++		githubRepositoryResponse(
++			page * 100 + index,
++			index === 0 && matchingFullName
++				? matchingFullName
++				: `marta/repository-${page}-${index}`
++		)
++	)
++}
++
+ describe('GitHub import integration', () => {
+ 	let moduleRef: TestingModule
+ 	let app: INestApplication
+ 	let adapter: HonoAdapter
+-	let paginate: ReturnType<typeof vi.fn>
++	let listForAuthenticatedUser: ReturnType<typeof vi.fn>
+ 	let githubOctokitClient: GitHubOctokitClient
+ 	let enqueueRepositoryImport: ReturnType<typeof vi.fn>
+ 
+@@ -114,15 +140,10 @@ describe('GitHub import integration', () => {
+ 
+ 		await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER })
+ 
+-		paginate = vi.fn()
++		listForAuthenticatedUser = vi.fn()
+ 		githubOctokitClient = new GitHubOctokitClient()
+ 		vi.spyOn(githubOctokitClient, 'createForUser').mockReturnValue({
+-			paginate,
+-			rest: {
+-				repos: {
+-					listForAuthenticatedUser: vi.fn(),
+-				},
+-			},
++			rest: { repos: { listForAuthenticatedUser } },
+ 		} as never)
+ 		enqueueRepositoryImport = vi.fn().mockResolvedValue(undefined)
+ 		moduleRef = await Test.createTestingModule({
+@@ -142,7 +163,7 @@ describe('GitHub import integration', () => {
+ 
+ 	beforeEach(async () => {
+ 		await resetIntegrationDatabase()
+-		paginate.mockReset()
++		listForAuthenticatedUser.mockReset()
+ 		enqueueRepositoryImport.mockClear()
+ 		enqueueRepositoryImport.mockResolvedValue(undefined)
+ 	})
+@@ -203,16 +224,101 @@ describe('GitHub import integration', () => {
+ 				githubUrl: 'https://github.com/marta/private-notes',
+ 			},
+ 		])
+-		expect(paginate).toHaveBeenCalledWith(
+-			expect.any(Function),
+-			{
++		expect(listForAuthenticatedUser).toHaveBeenCalledOnce()
++		expect(listForAuthenticatedUser).toHaveBeenCalledWith({
++			visibility: 'all',
++			sort: 'pushed',
++			direction: 'desc',
++			per_page: 50,
++			page: 1,
++		})
++	})
++
++	test('passes page and search through four GitHub pages', async () => {
++		const integrationSession = await createIntegrationSession({
++			username: 'marta',
++			email: 'marta@example.com',
++		})
++		await createGitHubAccount({
++			userId: integrationSession.userId,
++			accessToken: 'github-token',
++		})
++		const pages = new Map([
++			[2, fullGitHubRepositoryPage(2, 'marta/Notes')],
++			[3, fullGitHubRepositoryPage(3)],
++			[4, fullGitHubRepositoryPage(4, 'ludus/meeting-notes')],
++			[5, fullGitHubRepositoryPage(5)],
++		])
++		listForAuthenticatedUser.mockImplementation(({ page }: { page: number }) =>
++			Promise.resolve({
++				data: pages.get(page) ?? [],
++				headers: {
++					link: '<https://api.github.com/user/repos?page=6>; rel="next"',
++				},
++			})
++		)
++
++		const response = await listGitHubImportRepositories(
++			integrationSession.headers,
++			'page=2&search=Notes'
++		)
++		const body = (await response.json()) as GitHubImportRepositoriesResponseBody
++
++		expect(response.status).toBe(200)
++		expect(body.repositories.map(repository => repository.fullName)).toEqual([
++			'marta/Notes',
++			'ludus/meeting-notes',
++		])
++		expect(body.nextPage).toBe(6)
++		expect(listForAuthenticatedUser).toHaveBeenCalledTimes(4)
++		expect(
++			listForAuthenticatedUser.mock.calls.map(([input]) => input.page)
++		).toEqual([2, 3, 4, 5])
++		for (const [index, page] of [2, 3, 4, 5].entries())
++			expect(listForAuthenticatedUser).toHaveBeenNthCalledWith(index + 1, {
+ 				visibility: 'all',
+ 				sort: 'pushed',
+ 				direction: 'desc',
+-				per_page: 100,
+-			},
+-			expect.any(Function)
++				per_page: 50,
++				page,
++			})
++	})
++
++	test.each([
++		'   ',
++		'x'.repeat(201),
++	])('rejects invalid search input %j', async search => {
++		const integrationSession = await createIntegrationSession({
++			username: 'marta',
++			email: 'marta@example.com',
++		})
++		await createGitHubAccount({
++			userId: integrationSession.userId,
++			accessToken: 'github-token',
++		})
++
++		const response = await listGitHubImportRepositories(
++			integrationSession.headers,
++			new URLSearchParams({ search }).toString()
+ 		)
++		const body = (await response.json()) as ErrorResponseBody
++
++		expect(response.status).toBe(400)
++		expect(body).toMatchObject({
++			defined: false,
++			code: 'BAD_REQUEST',
++			status: 400,
++			message: 'Input validation failed',
++			data: { issues: expect.any(Array) },
++		})
++		expect(Object.keys(body).sort()).toEqual([
++			'code',
++			'data',
++			'defined',
++			'message',
++			'status',
++		])
++		expect(listForAuthenticatedUser).not.toHaveBeenCalled()
+ 	})
+ 
+ 	test('returns an empty list when GitHub returns no repositories', async () => {
+@@ -271,7 +377,7 @@ describe('GitHub import integration', () => {
+ 			code: 'UNAUTHORIZED',
+ 			message: 'github import authentication required',
+ 		})
+-		expect(paginate).not.toHaveBeenCalled()
++		expect(listForAuthenticatedUser).not.toHaveBeenCalled()
+ 	})
+ 
+ 	test('maps GitHub 401 failures to an auth error response', async () => {
+@@ -283,7 +389,7 @@ describe('GitHub import integration', () => {
+ 			userId: integrationSession.userId,
+ 			accessToken: 'github-token',
+ 		})
+-		paginate.mockRejectedValue({ status: 401 })
++		listForAuthenticatedUser.mockRejectedValue({ status: 401 })
+ 
+ 		const response = await listGitHubImportRepositories(
+ 			integrationSession.headers
+@@ -306,7 +412,7 @@ describe('GitHub import integration', () => {
+ 			userId: integrationSession.userId,
+ 			accessToken: 'github-token',
+ 		})
+-		paginate.mockRejectedValue({ status: 403 })
++		listForAuthenticatedUser.mockRejectedValue({ status: 403 })
+ 
+ 		const response = await listGitHubImportRepositories(
+ 			integrationSession.headers
+@@ -513,10 +619,15 @@ describe('GitHub import integration', () => {
+ 		await db.delete(user)
+ 	}
+ 
+-	function listGitHubImportRepositories(headers?: Headers) {
+-		return adapter.hono.request('http://localhost/github-import/repositories', {
+-			headers,
+-		})
++	function listGitHubImportRepositories(headers?: Headers, query?: string) {
++		const search = query ? `?${query}` : ''
++
++		return adapter.hono.request(
++			`http://localhost/github-import/repositories${search}`,
++			{
++				headers,
++			}
++		)
+ 	}
+ 
+ 	function retryGitHubImport(importId: RepositoryImportId, headers?: Headers) {
+@@ -532,8 +643,9 @@ describe('GitHub import integration', () => {
+ 	function mockGitHubRepositories(
+ 		repositories: (typeof publicRepository | typeof privateRepository)[]
+ 	) {
+-		paginate.mockImplementation((_endpoint, _options, mapPage) =>
+-			mapPage({ data: repositories }, vi.fn())
+-		)
++		listForAuthenticatedUser.mockResolvedValue({
++			data: repositories,
++			headers: {},
++		})
+ 	}
+ })
+diff --git a/apps/web/src/modules/github-import/components/github-import-load-status.spec.tsx b/apps/web/src/modules/github-import/components/github-import-load-status.spec.tsx
+new file mode 100644
+index 00000000..99c40533
+--- /dev/null
++++ b/apps/web/src/modules/github-import/components/github-import-load-status.spec.tsx
+@@ -0,0 +1,180 @@
++import { act, render, screen } from '@testing-library/react'
++import type { ComponentProps } from 'react'
++import { GitHubImportLoadStatus } from './github-import-load-status'
++
++class ControlledIntersectionObserver implements IntersectionObserver {
++	static instances: ControlledIntersectionObserver[] = []
++
++	readonly root = null
++	readonly rootMargin: string
++	readonly thresholds = [0]
++	private readonly targets = new Set<Element>()
++
++	disconnect = vi.fn(() => this.targets.clear())
++	takeRecords = vi.fn((): IntersectionObserverEntry[] => [])
++	unobserve = vi.fn((target: Element) => this.targets.delete(target))
++
++	constructor(
++		private readonly callback: IntersectionObserverCallback,
++		options?: IntersectionObserverInit
++	) {
++		this.rootMargin = options?.rootMargin ?? '0px'
++		ControlledIntersectionObserver.instances.push(this)
++	}
++
++	observe = vi.fn((target: Element) => {
++		this.targets.add(target)
++	})
++
++	intersect(isIntersecting: boolean) {
++		const target = this.targets.values().next().value
++
++		if (!target) throw new Error('Observed target missing')
++
++		this.callback(
++			[{ isIntersecting, target } as IntersectionObserverEntry],
++			this
++		)
++	}
++}
++
++const defaultProps: ComponentProps<typeof GitHubImportLoadStatus> = {
++	hasLoadMoreError: false,
++	hasNextPage: true,
++	isFetchingNextPage: false,
++	isSearching: false,
++	loadedCount: 2,
++	onLoadMore: vi.fn(),
++	pageCount: 1,
++	query: '',
++}
++
++function renderStatus(
++	overrides: Partial<ComponentProps<typeof GitHubImportLoadStatus>> = {}
++) {
++	return render(<GitHubImportLoadStatus {...defaultProps} {...overrides} />)
++}
++
++describe(GitHubImportLoadStatus.name, () => {
++	const originalIntersectionObserver = window.IntersectionObserver
++
++	beforeEach(() => {
++		window.IntersectionObserver =
++			ControlledIntersectionObserver as unknown as typeof IntersectionObserver
++	})
++
++	afterEach(() => {
++		window.IntersectionObserver = originalIntersectionObserver
++		ControlledIntersectionObserver.instances = []
++	})
++
++	test.each([
++		[
++			{
++				hasLoadMoreError: true,
++				isSearching: true,
++				isFetchingNextPage: true,
++				loadedCount: 0,
++			},
++			'Loading more failed.',
++		],
++		[
++			{ isSearching: true, isFetchingNextPage: true, loadedCount: 0 },
++			'Searching...',
++		],
++		[{ loadedCount: 0 }, 'No matches yet. Scanning more repositories...'],
++		[
++			{ isFetchingNextPage: true, loadedCount: 1 },
++			'1 repository loaded. Loading more...',
++		],
++		[{ loadedCount: 2 }, '2 repositories loaded. Scroll for more.'],
++		[{ hasNextPage: false, loadedCount: 3 }, 'All 3 repositories loaded.'],
++	] as const)('renders status precedence for %j', (props, expected) => {
++		renderStatus(props)
++
++		expect(screen.getByText(expected)).toBeTruthy()
++	})
++
++	test('announces status changes politely', () => {
++		renderStatus()
++
++		expect(
++			screen
++				.getByText('2 repositories loaded. Scroll for more.')
++				.getAttribute('aria-live')
++		).toBe('polite')
++	})
++
++	test('renders Retry only after a load-more error', () => {
++		const onLoadMore = vi.fn()
++		const rendered = renderStatus({ onLoadMore })
++
++		expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
++
++		rendered.rerender(
++			<GitHubImportLoadStatus
++				{...defaultProps}
++				hasLoadMoreError
++				onLoadMore={onLoadMore}
++			/>
++		)
++		act(() => screen.getByRole('button', { name: 'Retry' }).click())
++
++		expect(onLoadMore).toHaveBeenCalledOnce()
++	})
++
++	test('renders the sentinel only while another page can load without error', () => {
++		const rendered = renderStatus({ hasNextPage: false })
++
++		expect(rendered.container.querySelector('[aria-hidden="true"]')).toBeNull()
++
++		rendered.rerender(<GitHubImportLoadStatus {...defaultProps} />)
++		expect(
++			rendered.container.querySelector('[aria-hidden="true"]')
++		).toBeTruthy()
++
++		rendered.rerender(
++			<GitHubImportLoadStatus {...defaultProps} hasLoadMoreError />
++		)
++		expect(rendered.container.querySelector('[aria-hidden="true"]')).toBeNull()
++	})
++
++	test('loads on intersection and disconnects on unmount', () => {
++		const onLoadMore = vi.fn()
++		const rendered = renderStatus({ onLoadMore })
++		const observer = ControlledIntersectionObserver.instances[0]
++		const sentinel = rendered.container.querySelector('[aria-hidden="true"]')
++
++		expect(observer).toBeTruthy()
++		expect(sentinel).toBeTruthy()
++		if (!(observer && sentinel)) return
++		expect(observer.rootMargin).toBe('200px 0px')
++		expect(observer.observe).toHaveBeenCalledWith(sentinel)
++
++		act(() => observer.intersect(false))
++		expect(onLoadMore).not.toHaveBeenCalled()
++		act(() => observer.intersect(true))
++		expect(onLoadMore).toHaveBeenCalledOnce()
++
++		rendered.unmount()
++		expect(observer.disconnect).toHaveBeenCalledOnce()
++	})
++
++	test.each([
++		['pageCount', { pageCount: 2 }],
++		['query', { query: 'ludus' }],
++	] as const)('re-observes after %s changes', (_, changedProps) => {
++		const rendered = renderStatus()
++		const firstObserver = ControlledIntersectionObserver.instances[0]
++
++		rendered.rerender(
++			<GitHubImportLoadStatus {...defaultProps} {...changedProps} />
++		)
++
++		expect(firstObserver?.disconnect).toHaveBeenCalledOnce()
++		expect(ControlledIntersectionObserver.instances).toHaveLength(2)
++		expect(
++			ControlledIntersectionObserver.instances[1]?.observe
++		).toHaveBeenCalledOnce()
++	})
++})
+diff --git a/apps/web/src/modules/github-import/components/github-import-load-status.tsx b/apps/web/src/modules/github-import/components/github-import-load-status.tsx
+new file mode 100644
+index 00000000..e4ac16cc
+--- /dev/null
++++ b/apps/web/src/modules/github-import/components/github-import-load-status.tsx
+@@ -0,0 +1,74 @@
++import { Button } from '@repo/ui/components/button'
++import { formatRepositoryCount } from '../helpers/format-repository-count'
++
++const SENTINEL_OPTIONS = { rootMargin: '200px 0px' }
++
++interface GitHubImportLoadStatusProps {
++	hasLoadMoreError: boolean
++	hasNextPage: boolean
++	isFetchingNextPage: boolean
++	isSearching: boolean
++	loadedCount: number
++	onLoadMore: () => void
++	pageCount: number
++	query: string
++}
++
++function getStatusText({
++	hasLoadMoreError,
++	hasNextPage,
++	isFetchingNextPage,
++	isSearching,
++	loadedCount,
++}: Omit<GitHubImportLoadStatusProps, 'onLoadMore' | 'pageCount' | 'query'>) {
++	if (hasLoadMoreError) return 'Loading more failed.'
++	if (isSearching) return 'Searching...'
++	if (loadedCount === 0) return 'No matches yet. Scanning more repositories...'
++
++	const loaded = formatRepositoryCount(loadedCount)
++
++	if (isFetchingNextPage) return `${loaded} loaded. Loading more...`
++	if (hasNextPage) return `${loaded} loaded. Scroll for more.`
++
++	return `All ${loaded} loaded.`
++}
++
++export function GitHubImportLoadStatus(
++	props: Readonly<GitHubImportLoadStatusProps>
++) {
++	const { hasLoadMoreError, hasNextPage, onLoadMore, pageCount, query } = props
++
++	function observeSentinel(node: HTMLDivElement | null) {
++		if (!node) return
++
++		const observer = new IntersectionObserver(entries => {
++			if (entries.some(entry => entry.isIntersecting)) onLoadMore()
++		}, SENTINEL_OPTIONS)
++
++		observer.observe(node)
++
++		return () => observer.disconnect()
++	}
++
++	return (
++		<div className="flex flex-col gap-2">
++			<div className="flex items-center gap-3 text-muted-foreground text-sm">
++				<p aria-live="polite">{getStatusText(props)}</p>
++				{hasLoadMoreError && (
++					<Button onClick={onLoadMore} size="sm" variant="ghost">
++						Retry
++					</Button>
++				)}
++			</div>
++			{/* Keyed per fetched page and search so a still-visible sentinel re-observes, even when a page added no matches. Hidden after a failure so only Retry re-requests. */}
++			{hasNextPage && !hasLoadMoreError && (
++				<div
++					aria-hidden
++					className="h-px"
++					key={`${query}:${pageCount}`}
++					ref={observeSentinel}
++				/>
++			)}
++		</div>
++	)
++}
+diff --git a/apps/web/src/modules/github-import/components/github-import-selected-source.spec.tsx b/apps/web/src/modules/github-import/components/github-import-selected-source.spec.tsx
+new file mode 100644
+index 00000000..c6209f57
+--- /dev/null
++++ b/apps/web/src/modules/github-import/components/github-import-selected-source.spec.tsx
+@@ -0,0 +1,74 @@
++import type { GitHubImportRepository } from '@repo/contracts'
++import { render, screen } from '@testing-library/react'
++import { GitHubImportSelectedSource } from './github-import-selected-source'
++
++const repositories: GitHubImportRepository[] = [
++	{
++		githubId: '1',
++		ownerLogin: 'mnigos',
++		name: 'tessera',
++		fullName: 'mnigos/tessera',
++		visibility: 'private',
++		defaultBranch: 'main',
++		githubUrl: 'https://github.com/mnigos/tessera',
++	},
++	{
++		githubId: '2',
++		ownerLogin: 'ludus',
++		name: 'engine',
++		fullName: 'ludus/engine',
++		visibility: 'public',
++		defaultBranch: 'trunk',
++		githubUrl: 'https://github.com/ludus/engine',
++	},
++]
++
++describe(GitHubImportSelectedSource.name, () => {
++	test('uses selectedCount for readiness copy and Continue state', () => {
++		const rendered = render(
++			<GitHubImportSelectedSource
++				isImporting={false}
++				onContinue={vi.fn()}
++				repositories={repositories.slice(0, 1)}
++				selectedCount={3}
++			/>
++		)
++
++		expect(screen.getByText('3 repositories ready to import.')).toBeTruthy()
++		expect(
++			screen.getByRole<HTMLButtonElement>('button', { name: 'Continue' })
++				.disabled
++		).toBe(false)
++
++		rendered.rerender(
++			<GitHubImportSelectedSource
++				isImporting={false}
++				onContinue={vi.fn()}
++				repositories={repositories.slice(0, 1)}
++				selectedCount={0}
++			/>
++		)
++
++		expect(
++			screen.getByText('Choose GitHub repositories to continue.')
++		).toBeTruthy()
++		expect(
++			screen.getByRole<HTMLButtonElement>('button', { name: 'Continue' })
++				.disabled
++		).toBe(true)
++	})
++
++	test('renders names from resolved repositories', () => {
++		render(
++			<GitHubImportSelectedSource
++				isImporting={false}
++				onContinue={vi.fn()}
++				repositories={repositories}
++				selectedCount={2}
++			/>
++		)
++
++		expect(screen.getByText('mnigos/tessera')).toBeTruthy()
++		expect(screen.getByText('ludus/engine')).toBeTruthy()
++	})
++})
+diff --git a/apps/web/src/modules/github-import/components/github-import-selected-source.tsx b/apps/web/src/modules/github-import/components/github-import-selected-source.tsx
+index 28f7e1e4..3edb3c0d 100644
+--- a/apps/web/src/modules/github-import/components/github-import-selected-source.tsx
++++ b/apps/web/src/modules/github-import/components/github-import-selected-source.tsx
+@@ -2,6 +2,7 @@ import type { GitHubImportRepository } from '@repo/contracts'
+ import { Button } from '@repo/ui/components/button'
+ import { Card } from '@repo/ui/components/card'
+ import { formatGitHubImportDate } from '../helpers/format-github-import-date'
++import { formatRepositoryCount } from '../helpers/format-repository-count'
+ import { getGitHubImportErrorMessage } from '../helpers/get-github-import-error-message'
+ 
+ const CREATE_IMPORT_ERROR_FALLBACK = 'GitHub import could not be queued.'
+@@ -11,6 +12,7 @@ interface GitHubImportSelectedSourceProps {
+ 	isImporting: boolean
+ 	onContinue: () => void
+ 	repositories: GitHubImportRepository[]
++	selectedCount: number
+ }
+ 
+ export function GitHubImportSelectedSource({
+@@ -18,8 +20,8 @@ export function GitHubImportSelectedSource({
+ 	isImporting,
+ 	onContinue,
+ 	repositories,
++	selectedCount,
+ }: Readonly<GitHubImportSelectedSourceProps>) {
+-	const repositoryCount = repositories.length
+ 	const firstRepository = repositories[0]
+ 
+ 	return (
+@@ -29,8 +31,8 @@ export function GitHubImportSelectedSource({
+ 					Selected sources
+ 				</h2>
+ 				<p className="text-muted-foreground text-sm">
+-					{repositoryCount > 0
+-						? `${repositoryCount} ${repositoryCount === 1 ? 'repository' : 'repositories'} ready to import.`
++					{selectedCount > 0
++						? `${formatRepositoryCount(selectedCount)} ready to import.`
+ 						: 'Choose GitHub repositories to continue.'}
+ 				</p>
+ 			</div>
+@@ -69,7 +71,7 @@ export function GitHubImportSelectedSource({
+ 			)}
+ 			<Button
+ 				className="w-full cursor-pointer transition duration-150 ease-out hover:-translate-y-px hover:bg-primary/90"
+-				disabled={repositoryCount === 0 || isImporting}
++				disabled={selectedCount === 0 || isImporting}
+ 				onClick={onContinue}
+ 			>
+ 				{isImporting ? 'Importing...' : 'Continue'}
+diff --git a/apps/web/src/modules/github-import/components/github-import-source-selector.spec.tsx b/apps/web/src/modules/github-import/components/github-import-source-selector.spec.tsx
+index e2bb4b67..9b5c4eb5 100644
+--- a/apps/web/src/modules/github-import/components/github-import-source-selector.spec.tsx
++++ b/apps/web/src/modules/github-import/components/github-import-source-selector.spec.tsx
+@@ -1,5 +1,6 @@
+ import type { GitHubImportRepository } from '@repo/contracts'
+ import { fireEvent, render, screen, within } from '@testing-library/react'
++import type { ComponentProps } from 'react'
+ import { isGitHubAccessError } from '../helpers/is-github-access-error'
+ import { GitHubImportSourceSelector } from './github-import-source-selector'
+ 
+@@ -27,17 +28,53 @@ const repositories: GitHubImportRepository[] = [
+ const TESSERA_REPOSITORY_NAME_REGEX = /mnigos\/tessera/
+ const TESSERA_PUSHED_DATE_REGEX = /Pushed May 12, 2026/
+ 
++function renderSelector(
++	overrides: Partial<ComponentProps<typeof GitHubImportSourceSelector>> = {}
++) {
++	return render(
++		<GitHubImportSourceSelector
++			hasNextPage={false}
++			isError={false}
++			isFetchingNextPage={false}
++			isFetchNextPageError={false}
++			isImporting={false}
++			isLoading={false}
++			isSearching={false}
++			onContinue={vi.fn()}
++			onLoadMore={vi.fn()}
++			onQueryChange={vi.fn()}
++			onSelectAllRepositories={vi.fn()}
++			onToggleRepository={vi.fn()}
++			pageCount={1}
++			query=""
++			repositories={repositories}
++			selectedRepositories={[]}
++			selectedRepositoryIds={[]}
++			{...overrides}
++		/>
++	)
++}
++
+ describe('GitHubImportSourceSelector', () => {
+ 	test('shows loading state', () => {
+ 		render(
+ 			<GitHubImportSourceSelector
++				hasNextPage={false}
+ 				isError={false}
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading
++				isSearching={false}
+ 				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={vi.fn()}
+ 				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
+ 				repositories={[]}
++				selectedRepositories={[]}
+ 				selectedRepositoryIds={[]}
+ 			/>
+ 		)
+@@ -49,13 +86,22 @@ describe('GitHubImportSourceSelector', () => {
+ 	test('shows generic error state', () => {
+ 		render(
+ 			<GitHubImportSourceSelector
++				hasNextPage={false}
+ 				isError
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={vi.fn()}
+ 				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
+ 				repositories={[]}
++				selectedRepositories={[]}
+ 				selectedRepositoryIds={[]}
+ 			/>
+ 		)
+@@ -75,14 +121,23 @@ describe('GitHubImportSourceSelector', () => {
+ 					message: 'github import authentication required',
+ 					status: 401,
+ 				}}
++				hasNextPage={false}
+ 				isError
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onReconnectGitHub={onReconnectGitHub}
+ 				onSelectAllRepositories={vi.fn()}
+ 				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
+ 				repositories={[]}
++				selectedRepositories={[]}
+ 				selectedRepositoryIds={[]}
+ 			/>
+ 		)
+@@ -104,13 +159,22 @@ describe('GitHubImportSourceSelector', () => {
+ 					message: 'github import access denied',
+ 					status: 403,
+ 				}}
++				hasNextPage={false}
+ 				isError
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={vi.fn()}
+ 				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
+ 				repositories={[]}
++				selectedRepositories={[]}
+ 				selectedRepositoryIds={[]}
+ 			/>
+ 		)
+@@ -132,13 +196,22 @@ describe('GitHubImportSourceSelector', () => {
+ 	test('shows empty state', () => {
+ 		render(
+ 			<GitHubImportSourceSelector
++				hasNextPage={false}
+ 				isError={false}
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={vi.fn()}
+ 				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
+ 				repositories={[]}
++				selectedRepositories={[]}
+ 				selectedRepositoryIds={[]}
+ 			/>
+ 		)
+@@ -152,13 +225,22 @@ describe('GitHubImportSourceSelector', () => {
+ 	test('renders repository metadata', () => {
+ 		render(
+ 			<GitHubImportSourceSelector
++				hasNextPage={false}
+ 				isError={false}
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={vi.fn()}
+ 				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
+ 				repositories={repositories}
++				selectedRepositories={[]}
+ 				selectedRepositoryIds={[]}
+ 			/>
+ 		)
+@@ -174,19 +256,126 @@ describe('GitHubImportSourceSelector', () => {
+ 		expect(screen.getByText('trunk')).toBeTruthy()
+ 	})
+ 
++	test('renders and submits repository search', () => {
++		const onQueryChange = vi.fn()
++		renderSelector({ onQueryChange })
++		const input = screen.getByRole<HTMLInputElement>('textbox', {
++			name: 'Search repositories',
++		})
++
++		expect(input.maxLength).toBe(200)
++		fireEvent.change(input, { target: { value: 'ludus' } })
++		fireEvent.submit(input.closest('form') ?? input)
++
++		expect(onQueryChange).toHaveBeenCalledWith('ludus')
++	})
++
++	test('labels selection for all loaded repositories', () => {
++		const rendered = renderSelector()
++
++		expect(
++			screen.getByRole('button', { name: 'Select all loaded' })
++		).toBeTruthy()
++
++		rendered.rerender(
++			<GitHubImportSourceSelector
++				hasNextPage={false}
++				isError={false}
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
++				isImporting={false}
++				isLoading={false}
++				isSearching={false}
++				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
++				onSelectAllRepositories={vi.fn()}
++				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
++				repositories={repositories}
++				selectedRepositories={repositories}
++				selectedRepositoryIds={['1', '2']}
++			/>
++		)
++
++		expect(screen.getByRole('button', { name: 'Deselect loaded' })).toBeTruthy()
++	})
++
++	test('counts URL selection ids even when fewer repositories are resolved', () => {
++		renderSelector({
++			selectedRepositories: [repositories[0]],
++			selectedRepositoryIds: ['1', '404'],
++		})
++
++		expect(screen.getByText('2 selected')).toBeTruthy()
++		expect(screen.getByText('2 repositories ready to import.')).toBeTruthy()
++	})
++
++	test('shows a finished search empty state', () => {
++		renderSelector({ query: 'ludus', repositories: [] })
++
++		expect(screen.getByText('No repositories found')).toBeTruthy()
++		expect(screen.getByText('No repositories match "ludus".')).toBeTruthy()
++	})
++
++	test('keeps scanning without an empty message while search has more pages', () => {
++		renderSelector({
++			hasNextPage: true,
++			query: 'ludus',
++			repositories: [],
++		})
++
++		expect(
++			screen.getByText('No matches yet. Scanning more repositories...')
++		).toBeTruthy()
++		expect(screen.queryByText('No repositories found')).toBeNull()
++		expect(screen.queryByText('No repositories match "ludus".')).toBeNull()
++	})
++
++	test('keeps loaded repositories after a non-auth list error', () => {
++		renderSelector({ isError: true, error: { status: 500 } })
++
++		expect(screen.getByText('mnigos/tessera')).toBeTruthy()
++		expect(screen.queryByText('Repository list unavailable')).toBeNull()
++	})
++
++	test('shows reconnect state after an auth error with loaded repositories', () => {
++		renderSelector({ isError: true, error: { status: 401 } })
++
++		expect(screen.getByText('GitHub access needs attention')).toBeTruthy()
++		expect(screen.queryByText('mnigos/tessera')).toBeNull()
++	})
++
++	test('shows the error state when a search fails with loaded repositories', () => {
++		renderSelector({ isError: true, isSearching: true })
++
++		expect(screen.getByText('Repository list unavailable')).toBeTruthy()
++		expect(screen.queryByText('mnigos/tessera')).toBeNull()
++	})
++
+ 	test('selects multiple repositories through URL-backed callbacks', () => {
+ 		const onContinue = vi.fn()
+ 		const onSelectAllRepositories = vi.fn()
+ 		const onToggleRepository = vi.fn()
+ 		const { rerender } = render(
+ 			<GitHubImportSourceSelector
++				hasNextPage={false}
+ 				isError={false}
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={onContinue}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={onSelectAllRepositories}
+ 				onToggleRepository={onToggleRepository}
++				pageCount={1}
++				query=""
+ 				repositories={repositories}
++				selectedRepositories={[]}
+ 				selectedRepositoryIds={[]}
+ 			/>
+ 		)
+@@ -199,13 +388,22 @@ describe('GitHubImportSourceSelector', () => {
+ 
+ 		rerender(
+ 			<GitHubImportSourceSelector
++				hasNextPage={false}
+ 				isError={false}
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={onContinue}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={onSelectAllRepositories}
+ 				onToggleRepository={onToggleRepository}
++				pageCount={1}
++				query=""
+ 				repositories={repositories}
++				selectedRepositories={repositories}
+ 				selectedRepositoryIds={['1', '2']}
+ 			/>
+ 		)
+@@ -217,7 +415,7 @@ describe('GitHubImportSourceSelector', () => {
+ 		).toBe(false)
+ 		fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+ 		expect(onContinue).toHaveBeenCalledOnce()
+-		fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
++		fireEvent.click(screen.getByRole('button', { name: 'Deselect loaded' }))
+ 		expect(onSelectAllRepositories).toHaveBeenCalledOnce()
+ 		expect(
+ 			screen
+@@ -229,16 +427,25 @@ describe('GitHubImportSourceSelector', () => {
+ 	test('shows friendly import conflict messages', () => {
+ 		render(
+ 			<GitHubImportSourceSelector
++				hasNextPage={false}
+ 				importError={{
+ 					message: 'github repository import target slug already exists',
+ 				}}
+ 				isError={false}
++				isFetchingNextPage={false}
++				isFetchNextPageError={false}
+ 				isImporting={false}
+ 				isLoading={false}
++				isSearching={false}
+ 				onContinue={vi.fn()}
++				onLoadMore={vi.fn()}
++				onQueryChange={vi.fn()}
+ 				onSelectAllRepositories={vi.fn()}
+ 				onToggleRepository={vi.fn()}
++				pageCount={1}
++				query=""
+ 				repositories={repositories}
++				selectedRepositories={[repositories[0]]}
+ 				selectedRepositoryIds={['1']}
+ 			/>
+ 		)
+diff --git a/apps/web/src/modules/github-import/components/github-import-source-selector.tsx b/apps/web/src/modules/github-import/components/github-import-source-selector.tsx
+index 04fd1fa6..92658b3e 100644
+--- a/apps/web/src/modules/github-import/components/github-import-source-selector.tsx
++++ b/apps/web/src/modules/github-import/components/github-import-source-selector.tsx
+@@ -1,8 +1,13 @@
+-import type { GitHubImportRepository } from '@repo/contracts'
++import {
++	GITHUB_IMPORT_SEARCH_MAX_LENGTH,
++	type GitHubImportRepository,
++} from '@repo/contracts'
+ import { Button } from '@repo/ui/components/button'
+ import { Card } from '@repo/ui/components/card'
+ import { FaGithub } from 'react-icons/fa'
++import { SearchInput } from '@/shared/components/search-input'
+ import { isGitHubAccessError } from '../helpers/is-github-access-error'
++import { GitHubImportLoadStatus } from './github-import-load-status'
+ import { GitHubImportLoadingState } from './github-import-loading-state'
+ import { GitHubImportMessage } from './github-import-message'
+ import { GitHubImportRepositoryRow } from './github-import-repository-row'
+@@ -10,43 +15,64 @@ import { GitHubImportSelectedSource } from './github-import-selected-source'
+ 
+ interface GitHubImportSourceSelectorProps {
+ 	error?: unknown
++	hasNextPage: boolean
+ 	importError?: unknown
+ 	isError: boolean
++	isFetchingNextPage: boolean
++	isFetchNextPageError: boolean
+ 	isImporting: boolean
+ 	isLoading: boolean
+-	onReconnectGitHub?: () => void
++	isSearching: boolean
+ 	onContinue: () => void
++	onLoadMore: () => void
++	onQueryChange: (query: string | undefined) => void
++	onReconnectGitHub?: () => void
+ 	onSelectAllRepositories: () => void
+ 	onToggleRepository: (repositoryId: string) => void
++	pageCount: number
++	query: string
+ 	repositories: GitHubImportRepository[]
++	selectedRepositories: GitHubImportRepository[]
+ 	selectedRepositoryIds: string[]
+ }
+ 
+ export function GitHubImportSourceSelector({
+ 	error,
++	hasNextPage,
+ 	importError,
+ 	isError,
++	isFetchingNextPage,
++	isFetchNextPageError,
+ 	isImporting,
+ 	isLoading,
++	isSearching,
+ 	onContinue,
++	onLoadMore,
++	onQueryChange,
+ 	onReconnectGitHub,
+ 	onSelectAllRepositories,
+ 	onToggleRepository,
++	pageCount,
++	query,
+ 	repositories,
++	selectedRepositories,
+ 	selectedRepositoryIds,
+ }: Readonly<GitHubImportSourceSelectorProps>) {
+ 	const selectedRepositoryIdSet = new Set(selectedRepositoryIds)
+-	const selectedRepositories = repositories.filter(repository =>
+-		selectedRepositoryIdSet.has(repository.githubId)
+-	)
+-	const areAllRepositoriesSelected =
++	const areAllLoadedSelected =
+ 		repositories.length > 0 &&
+-		selectedRepositories.length === repositories.length
++		repositories.every(repository =>
++			selectedRepositoryIdSet.has(repository.githubId)
++		)
+ 	const needsGitHubReconnect = isGitHubAccessError(error)
++	// A failed page or refetch keeps the loaded list unless GitHub access itself is broken.
++	const showsListError =
++		isError &&
++		(needsGitHubReconnect || isSearching || repositories.length === 0)
+ 
+ 	if (isLoading) return <GitHubImportLoadingState />
+ 
+-	if (isError)
++	if (showsListError)
+ 		return (
+ 			<GitHubImportMessage
+ 				action={
+@@ -70,7 +96,7 @@ export function GitHubImportSourceSelector({
+ 			/>
+ 		)
+ 
+-	if (repositories.length === 0)
++	if (repositories.length === 0 && !hasNextPage && !query)
+ 		return (
+ 			<GitHubImportMessage
+ 				description="No GitHub repositories are available for import yet."
+@@ -81,9 +107,16 @@ export function GitHubImportSourceSelector({
+ 	return (
+ 		<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+ 			<div className="flex flex-col gap-3">
++				<SearchInput
++					label="Search repositories"
++					maxLength={GITHUB_IMPORT_SEARCH_MAX_LENGTH}
++					onQueryChange={onQueryChange}
++					placeholder="Search by owner or name"
++					query={query}
++				/>
+ 				<div className="flex items-center justify-between gap-3">
+ 					<p className="text-muted-foreground text-sm">
+-						{selectedRepositories.length} selected
++						{selectedRepositoryIds.length} selected
+ 					</p>
+ 					<Button
+ 						className="cursor-pointer transition duration-150 ease-out hover:-translate-y-px"
+@@ -91,25 +124,47 @@ export function GitHubImportSourceSelector({
+ 						size="sm"
+ 						variant="secondary"
+ 					>
+-						{areAllRepositoriesSelected ? 'Clear all' : 'Select all'}
++						{areAllLoadedSelected ? 'Deselect loaded' : 'Select all loaded'}
+ 					</Button>
+ 				</div>
+-				<Card className="gap-0 divide-y divide-border p-0">
+-					{repositories.map(repository => (
+-						<GitHubImportRepositoryRow
+-							isSelected={selectedRepositoryIdSet.has(repository.githubId)}
+-							key={repository.githubId}
+-							onToggleRepository={onToggleRepository}
+-							repository={repository}
++				{repositories.length > 0 ? (
++					<Card className="gap-0 divide-y divide-border p-0">
++						{repositories.map(repository => (
++							<GitHubImportRepositoryRow
++								isSelected={selectedRepositoryIdSet.has(repository.githubId)}
++								key={repository.githubId}
++								onToggleRepository={onToggleRepository}
++								repository={repository}
++							/>
++						))}
++					</Card>
++				) : (
++					!hasNextPage && (
++						<GitHubImportMessage
++							description={`No repositories match "${query}".`}
++							title="No repositories found"
+ 						/>
+-					))}
+-				</Card>
++					)
++				)}
++				{(repositories.length > 0 || hasNextPage) && (
++					<GitHubImportLoadStatus
++						hasLoadMoreError={isFetchNextPageError}
++						hasNextPage={hasNextPage}
++						isFetchingNextPage={isFetchingNextPage}
++						isSearching={isSearching}
++						loadedCount={repositories.length}
++						onLoadMore={onLoadMore}
++						pageCount={pageCount}
++						query={query}
++					/>
++				)}
+ 			</div>
+ 			<GitHubImportSelectedSource
+ 				error={importError}
+ 				isImporting={isImporting}
+ 				onContinue={onContinue}
+ 				repositories={selectedRepositories}
++				selectedCount={selectedRepositoryIds.length}
+ 			/>
+ 		</div>
+ 	)
+diff --git a/apps/web/src/modules/github-import/helpers/format-repository-count.ts b/apps/web/src/modules/github-import/helpers/format-repository-count.ts
+new file mode 100644
+index 00000000..0286f952
+--- /dev/null
++++ b/apps/web/src/modules/github-import/helpers/format-repository-count.ts
+@@ -0,0 +1,3 @@
++export function formatRepositoryCount(count: number) {
++	return `${count} ${count === 1 ? 'repository' : 'repositories'}`
++}
+diff --git a/apps/web/src/modules/github-import/helpers/id-list.ts b/apps/web/src/modules/github-import/helpers/id-list.ts
+new file mode 100644
+index 00000000..63dc4917
+--- /dev/null
++++ b/apps/web/src/modules/github-import/helpers/id-list.ts
+@@ -0,0 +1,7 @@
++export function parseIdList(ids?: string) {
++	return [...new Set(ids?.split(',') ?? [])]
++}
++
++export function serializeIdList(ids: string[]) {
++	return ids.length > 0 ? ids.join(',') : undefined
++}
+diff --git a/apps/web/src/modules/github-import/hooks/use-github-import-repositories.query.spec.ts b/apps/web/src/modules/github-import/hooks/use-github-import-repositories.query.spec.ts
+new file mode 100644
+index 00000000..059697fe
+--- /dev/null
++++ b/apps/web/src/modules/github-import/hooks/use-github-import-repositories.query.spec.ts
+@@ -0,0 +1,39 @@
++import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
++import { orpcQuery } from '@/lib/orpc/query'
++import { useGitHubImportRepositoriesQuery } from './use-github-import-repositories.query'
++
++vi.mock('@tanstack/react-query', () => ({
++	keepPreviousData: vi.fn(),
++	useInfiniteQuery: vi.fn(options => options),
++}))
++
++vi.mock('@/lib/orpc/query', () => ({
++	orpcQuery: {
++		githubImport: {
++			listRepositories: { infiniteOptions: vi.fn(options => options) },
++		},
++	},
++}))
++
++describe('GitHub import repositories query', () => {
++	test('configures paged search through generated infinite options', () => {
++		useGitHubImportRepositoriesQuery({ search: 'notes' }, false)
++		const infiniteOptions = vi.mocked(
++			orpcQuery.githubImport.listRepositories.infiniteOptions
++		)
++		const options = infiniteOptions.mock.calls[0]?.[0]
++
++		expect(options).toBeTruthy()
++		if (!options) return
++		expect(options.enabled).toBe(false)
++		expect(options.initialPageParam).toBe(1)
++		expect(options.placeholderData).toBe(keepPreviousData)
++		if (typeof options.input !== 'function')
++			throw new Error('Infinite query input factory missing')
++		expect(options.input(4)).toEqual({ page: 4, search: 'notes' })
++		expect(
++			options.getNextPageParam({ repositories: [], nextPage: 5 }, [], 1, [])
++		).toBe(5)
++		expect(useInfiniteQuery).toHaveBeenCalledWith(options)
++	})
++})
+diff --git a/apps/web/src/modules/github-import/hooks/use-github-import-repositories.query.ts b/apps/web/src/modules/github-import/hooks/use-github-import-repositories.query.ts
+index 77eb2e59..3f1a86f8 100644
+--- a/apps/web/src/modules/github-import/hooks/use-github-import-repositories.query.ts
++++ b/apps/web/src/modules/github-import/hooks/use-github-import-repositories.query.ts
+@@ -1,8 +1,25 @@
+-import { useQuery } from '@tanstack/react-query'
++import type { ListGitHubImportRepositoriesInput } from '@repo/contracts'
++import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
+ import { orpcQuery } from '@/lib/orpc/query'
+ 
+-export function useGitHubImportRepositoriesQuery(enabled: boolean) {
+-	return useQuery(
+-		orpcQuery.githubImport.listRepositories.queryOptions({ enabled })
++export function useGitHubImportRepositoriesQuery(
++	input: Pick<ListGitHubImportRepositoriesInput, 'search'>,
++	enabled: boolean
++) {
++	return useInfiniteQuery(
++		getGitHubImportRepositoriesInfiniteOptions(input, enabled)
+ 	)
+ }
++
++export function getGitHubImportRepositoriesInfiniteOptions(
++	input: Pick<ListGitHubImportRepositoriesInput, 'search'>,
++	enabled = true
++) {
++	return orpcQuery.githubImport.listRepositories.infiniteOptions({
++		enabled,
++		getNextPageParam: lastPage => lastPage.nextPage,
++		initialPageParam: 1,
++		input: pageParam => ({ page: pageParam, search: input.search }),
++		placeholderData: keepPreviousData,
++	})
++}
+diff --git a/apps/web/src/modules/github-import/hooks/use-github-import-selection.spec.ts b/apps/web/src/modules/github-import/hooks/use-github-import-selection.spec.ts
+new file mode 100644
+index 00000000..7f69dcd7
+--- /dev/null
++++ b/apps/web/src/modules/github-import/hooks/use-github-import-selection.spec.ts
+@@ -0,0 +1,142 @@
++import type { GitHubImportRepository } from '@repo/contracts'
++import { useNavigate } from '@tanstack/react-router'
++import { act, renderHook } from '@testing-library/react'
++import { useGitHubImportSelection } from './use-github-import-selection'
++
++vi.mock('@tanstack/react-router', () => ({ useNavigate: vi.fn() }))
++
++interface SearchNavigation {
++	search: (previousSearch: Record<string, unknown>) => Record<string, unknown>
++}
++
++const useNavigateMock = vi.mocked(useNavigate)
++const navigate = vi.fn<(options: SearchNavigation) => void>()
++
++function repository(
++	githubId: string,
++	fullName: string
++): GitHubImportRepository {
++	const [ownerLogin = 'marta', name = 'repository'] = fullName.split('/')
++
++	return {
++		githubId,
++		ownerLogin,
++		name,
++		fullName,
++		visibility: 'private',
++		defaultBranch: 'main',
++		githubUrl: `https://github.com/${fullName}`,
++	}
++}
++
++const repositorySeven = repository('7', 'marta/notes')
++const repositoryEight = repository('8', 'marta/tessera')
++
++function applyLatestSearch(previousSearch: Record<string, unknown>) {
++	const navigation = navigate.mock.calls.at(-1)?.[0]
++
++	if (!navigation) throw new Error('Selection navigation missing')
++
++	return navigation.search(previousSearch)
++}
++
++describe(useGitHubImportSelection.name, () => {
++	beforeEach(() => {
++		useNavigateMock.mockReturnValue(navigate as never)
++	})
++
++	test('toggles an id while keeping other search params', () => {
++		const rendered = renderHook(
++			({ selectedIds }) =>
++				useGitHubImportSelection(selectedIds, [repositorySeven]),
++			{ initialProps: { selectedIds: undefined as string | undefined } }
++		)
++
++		act(() => rendered.result.current.toggleRepository('7'))
++		expect(applyLatestSearch({ q: 'notes', view: 'list' })).toEqual({
++			q: 'notes',
++			view: 'list',
++			selectedRepositoryIds: '7',
++		})
++
++		rendered.rerender({ selectedIds: '7' })
++		act(() => rendered.result.current.toggleRepository('7'))
++		expect(applyLatestSearch({ q: 'notes', view: 'list' })).toEqual({
++			q: 'notes',
++			view: 'list',
++			selectedRepositoryIds: undefined,
++		})
++	})
++
++	test('unions loaded ids with the existing ordered selection', () => {
++		const { result } = renderHook(() =>
++			useGitHubImportSelection('9,7', [repositorySeven, repositoryEight])
++		)
++
++		act(() => result.current.selectAllLoaded())
++
++		expect(applyLatestSearch({ q: 'notes' })).toEqual({
++			q: 'notes',
++			selectedRepositoryIds: '9,7,8',
++		})
++	})
++
++	test('deselects only loaded ids when every loaded id is selected', () => {
++		const { result } = renderHook(() =>
++			useGitHubImportSelection('9,7,8', [repositorySeven, repositoryEight])
++		)
++
++		act(() => result.current.selectAllLoaded())
++
++		expect(applyLatestSearch({ q: 'notes' })).toEqual({
++			q: 'notes',
++			selectedRepositoryIds: '9',
++		})
++	})
++
++	test('resolves selected repositories from loaded data then the session cache', () => {
++		const updatedRepositorySeven = {
++			...repositorySeven,
++			name: 'notes-renamed',
++			fullName: 'marta/notes-renamed',
++		}
++		const rendered = renderHook(
++			({ loadedRepositories }) =>
++				useGitHubImportSelection('7', loadedRepositories),
++			{ initialProps: { loadedRepositories: [repositorySeven] } }
++		)
++
++		expect(rendered.result.current.selectedRepositories).toEqual([
++			repositorySeven,
++		])
++		act(() => rendered.result.current.toggleRepository('7'))
++
++		rendered.rerender({ loadedRepositories: [updatedRepositorySeven] })
++		expect(rendered.result.current.selectedRepositories).toEqual([
++			updatedRepositorySeven,
++		])
++
++		rendered.rerender({ loadedRepositories: [repositoryEight] })
++		expect(rendered.result.current.selectedRepositories).toEqual([
++			repositorySeven,
++		])
++	})
++
++	test('keeps unknown ids selected without resolving repository objects', () => {
++		const { result } = renderHook(() =>
++			useGitHubImportSelection('404', [repositorySeven])
++		)
++
++		expect(result.current.selectedRepositoryIds).toEqual(['404'])
++		expect(result.current.selectedRepositories).toEqual([])
++	})
++
++	test('deduplicates ids parsed from the URL', () => {
++		const { result } = renderHook(() =>
++			useGitHubImportSelection('7,7', [repositorySeven])
++		)
++
++		expect(result.current.selectedRepositoryIds).toEqual(['7'])
++		expect(result.current.selectedRepositories).toEqual([repositorySeven])
++	})
++})
+diff --git a/apps/web/src/modules/github-import/hooks/use-github-import-selection.ts b/apps/web/src/modules/github-import/hooks/use-github-import-selection.ts
+new file mode 100644
+index 00000000..4194db3e
+--- /dev/null
++++ b/apps/web/src/modules/github-import/hooks/use-github-import-selection.ts
+@@ -0,0 +1,74 @@
++import type { GitHubImportRepository } from '@repo/contracts'
++import { useNavigate } from '@tanstack/react-router'
++import { useState } from 'react'
++import { parseIdList, serializeIdList } from '../helpers/id-list'
++
++function toggleId(ids: string[], id: string) {
++	return ids.includes(id)
++		? ids.filter(existing => existing !== id)
++		: [...ids, id]
++}
++
++export function useGitHubImportSelection(
++	selectedRepositoryIdsSearch: string | undefined,
++	loadedRepositories: GitHubImportRepository[]
++) {
++	const navigate = useNavigate({ from: '/import/github' })
++	const [cachedRepositories, setCachedRepositories] = useState<
++		Record<string, GitHubImportRepository>
++	>({})
++	const selectedRepositoryIds = parseIdList(selectedRepositoryIdsSearch)
++	const loadedById = new Map(
++		loadedRepositories.map(repository => [repository.githubId, repository])
++	)
++	const selectedRepositories = selectedRepositoryIds
++		.map(id => loadedById.get(id) ?? cachedRepositories[id])
++		.filter(repository => repository !== undefined)
++
++	function navigateSelection(nextIds: string[]) {
++		navigate({
++			search: previousSearch => ({
++				...previousSearch,
++				selectedRepositoryIds: serializeIdList(nextIds),
++			}),
++		})
++	}
++
++	function toggleRepository(repositoryId: string) {
++		const repository = loadedById.get(repositoryId)
++
++		if (repository)
++			setCachedRepositories(cache => ({ ...cache, [repositoryId]: repository }))
++
++		navigateSelection(toggleId(selectedRepositoryIds, repositoryId))
++	}
++
++	function selectAllLoaded() {
++		const loadedIds = loadedRepositories.map(repository => repository.githubId)
++		const allLoadedSelected =
++			loadedIds.length > 0 &&
++			loadedIds.every(id => selectedRepositoryIds.includes(id))
++
++		if (allLoadedSelected) {
++			navigateSelection(
++				selectedRepositoryIds.filter(id => !loadedIds.includes(id))
++			)
++			return
++		}
++
++		setCachedRepositories(cache => ({
++			...cache,
++			...Object.fromEntries(
++				loadedRepositories.map(repository => [repository.githubId, repository])
++			),
++		}))
++		navigateSelection([...new Set([...selectedRepositoryIds, ...loadedIds])])
++	}
++
++	return {
++		selectAllLoaded,
++		selectedRepositories,
++		selectedRepositoryIds,
++		toggleRepository,
++	}
++}
+diff --git a/apps/web/src/modules/github-import/hooks/use-github-imports.query.ts b/apps/web/src/modules/github-import/hooks/use-github-imports.query.ts
+index 64cd3afa..409caf16 100644
+--- a/apps/web/src/modules/github-import/hooks/use-github-imports.query.ts
++++ b/apps/web/src/modules/github-import/hooks/use-github-imports.query.ts
+@@ -2,15 +2,17 @@ import { useQuery } from '@tanstack/react-query'
+ import { orpcQuery } from '@/lib/orpc/query'
+ 
+ export function useGitHubImportsQuery(enabled: boolean) {
+-	return useQuery(
+-		orpcQuery.githubImport.listImports.queryOptions({
+-			enabled,
+-			refetchInterval: query =>
+-				query.state.data?.imports.some(repositoryImport =>
+-					['pending', 'running'].includes(repositoryImport.status)
+-				)
+-					? 2000
+-					: false,
+-		})
+-	)
++	return useQuery(getGitHubImportsQueryOptions(enabled))
++}
++
++export function getGitHubImportsQueryOptions(enabled = true) {
++	return orpcQuery.githubImport.listImports.queryOptions({
++		enabled,
++		refetchInterval: query =>
++			query.state.data?.imports.some(repositoryImport =>
++				['pending', 'running'].includes(repositoryImport.status)
++			)
++				? 2000
++				: false,
++	})
+ }
+diff --git a/apps/web/src/modules/github-import/routes/import.github.route.spec.tsx b/apps/web/src/modules/github-import/routes/import.github.route.spec.tsx
+index 67891894..bbcd0a79 100644
+--- a/apps/web/src/modules/github-import/routes/import.github.route.spec.tsx
++++ b/apps/web/src/modules/github-import/routes/import.github.route.spec.tsx
+@@ -1,4 +1,5 @@
+ import { render, screen } from '@testing-library/react'
++import type { z } from 'zod'
+ import { authClient } from '@/lib/auth/client'
+ import { useAuth } from '@/modules/auth/hooks/use-auth'
+ import { useCreateGitHubImportMutation } from '../hooks/use-create-github-import.mutation'
+@@ -23,13 +24,53 @@ vi.mock('../hooks/use-create-github-import.mutation', () => ({
+ 	useCreateGitHubImportMutation: vi.fn(),
+ }))
+ vi.mock('../hooks/use-github-import-repositories.query', () => ({
++	getGitHubImportRepositoriesInfiniteOptions: vi.fn(input => ({
++		queryKey: ['repositories', input],
++	})),
+ 	useGitHubImportRepositoriesQuery: vi.fn(),
+ }))
+ vi.mock('../hooks/use-github-imports.query', () => ({
++	getGitHubImportsQueryOptions: vi.fn(() => ({ queryKey: ['imports'] })),
+ 	useGitHubImportsQuery: vi.fn(),
+ }))
+ 
+ describe('GitHubImportRoute', () => {
++	test('prefetches repositories and imports for signed-in readers', async () => {
++		const ensureInfiniteQueryData = vi.fn().mockRejectedValue(new Error('401'))
++		const ensureQueryData = vi.fn().mockResolvedValue({ imports: [] })
++		const context = {
++			queryClient: { ensureInfiniteQueryData, ensureQueryData },
++			user: { id: 'user-1' },
++		}
++		const loader = Route.options.loader as (options: unknown) => Promise<void>
++
++		expect(
++			(Route.options.loaderDeps as (options: unknown) => unknown)({
++				search: { q: 'ludus' },
++			})
++		).toEqual({ q: 'ludus' })
++		await expect(
++			loader({ context, deps: { q: 'ludus' } })
++		).resolves.toBeUndefined()
++		expect(ensureInfiniteQueryData).toHaveBeenCalledWith({
++			queryKey: ['repositories', { search: 'ludus' }],
++		})
++		expect(ensureQueryData).toHaveBeenCalledWith({ queryKey: ['imports'] })
++
++		await loader({ context: { ...context, user: undefined }, deps: {} })
++		expect(ensureInfiniteQueryData).toHaveBeenCalledOnce()
++	})
++
++	test('drops blank or over-long search queries instead of failing the route', () => {
++		const validateSearch = Route.options.validateSearch as z.ZodType
++
++		expect(validateSearch.parse({ q: ' ludus ' })).toEqual({ q: 'ludus' })
++		expect(validateSearch.parse({ q: '   ' })).toEqual({ q: undefined })
++		expect(validateSearch.parse({ q: 'x'.repeat(201) })).toEqual({
++			q: undefined,
++		})
++	})
++
+ 	test('states that GitHub imports remain personally owned', () => {
+ 		vi.mocked(useAuth).mockReturnValue({
+ 			isLoading: true,
+diff --git a/apps/web/src/modules/github-import/routes/import.github.route.tsx b/apps/web/src/modules/github-import/routes/import.github.route.tsx
+index 00b27125..38fff463 100644
+--- a/apps/web/src/modules/github-import/routes/import.github.route.tsx
++++ b/apps/web/src/modules/github-import/routes/import.github.route.tsx
+@@ -1,4 +1,8 @@
+-import type { GitHubRepositoryImport } from '@repo/contracts'
++import { safe } from '@orpc/client'
++import {
++	GITHUB_IMPORT_SEARCH_MAX_LENGTH,
++	type GitHubRepositoryImport,
++} from '@repo/contracts'
+ import { Button } from '@repo/ui/components/button'
+ import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router'
+ import { useState } from 'react'
+@@ -10,23 +14,52 @@ import { GitHubImportActivity } from '../components/github-import-activity'
+ import { GitHubImportLoadingState } from '../components/github-import-loading-state'
+ import { GitHubImportMessage } from '../components/github-import-message'
+ import { GitHubImportSourceSelector } from '../components/github-import-source-selector'
++import { parseIdList, serializeIdList } from '../helpers/id-list'
+ import { isGitHubImportSourceConflictError } from '../helpers/is-github-import-source-conflict-error'
+ import { scrollToGitHubImportActivity } from '../helpers/scroll-to-github-import-activity'
+ import { useCreateGitHubImportMutation } from '../hooks/use-create-github-import.mutation'
+-import { useGitHubImportRepositoriesQuery } from '../hooks/use-github-import-repositories.query'
+-import { useGitHubImportsQuery } from '../hooks/use-github-imports.query'
++import {
++	getGitHubImportRepositoriesInfiniteOptions,
++	useGitHubImportRepositoriesQuery,
++} from '../hooks/use-github-import-repositories.query'
++import { useGitHubImportSelection } from '../hooks/use-github-import-selection'
++import {
++	getGitHubImportsQueryOptions,
++	useGitHubImportsQuery,
++} from '../hooks/use-github-imports.query'
+ 
+ const UUID_LIST_REGEX =
+ 	/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}(,[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12})*$/i
+ 
+ export const Route = createFileRoute('/import/github')({
+ 	validateSearch: z.object({
++		q: z
++			.string()
++			.trim()
++			.max(GITHUB_IMPORT_SEARCH_MAX_LENGTH)
++			.optional()
++			.catch(undefined)
++			.transform(query => (query ? query : undefined)),
+ 		selectedRepositoryIds: z
+ 			.string()
+ 			.regex(/^\d+(,\d+)*$/)
+ 			.optional(),
+ 		queuedImportIds: z.string().regex(UUID_LIST_REGEX).optional(),
+ 	}),
++	loaderDeps: ({ search: { q } }) => ({ q }),
++	// Prefetch failures are not route errors: the picker renders the reconnect or error state itself.
++	loader: async ({ context, deps: { q } }) => {
++		if (!context.user) return
++
++		await Promise.all([
++			safe(
++				context.queryClient.ensureInfiniteQueryData(
++					getGitHubImportRepositoriesInfiniteOptions({ search: q })
++				)
++			),
++			safe(context.queryClient.ensureQueryData(getGitHubImportsQueryOptions())),
++		])
++	},
+ 	head: () => ({
+ 		meta: [
+ 			{ title: 'Import from GitHub · detent' },
+@@ -41,13 +74,23 @@ export const Route = createFileRoute('/import/github')({
+ 
+ function GitHubImportRoute() {
+ 	const {
++		q,
+ 		queuedImportIds: queuedImportIdsSearch,
+ 		selectedRepositoryIds: selectedRepositoryIdsSearch,
+ 	} = Route.useSearch()
+ 	const navigate = useNavigate({ from: '/import/github' })
+ 	const { isLoading: isAuthLoading, signIn, user } = useAuth()
+ 	const isAuthenticated = user != null
+-	const repositoriesQuery = useGitHubImportRepositoriesQuery(isAuthenticated)
++	const repositoriesQuery = useGitHubImportRepositoriesQuery(
++		{ search: q },
++		isAuthenticated
++	)
++	const pages = repositoriesQuery.data?.pages ?? []
++	const repositories = pages.flatMap(page => page.repositories)
++	const selection = useGitHubImportSelection(
++		selectedRepositoryIdsSearch,
++		repositories
++	)
+ 	const importsQuery = useGitHubImportsQuery(isAuthenticated)
+ 	const createImportMutation = useCreateGitHubImportMutation()
+ 	const [importError, setImportError] = useState<unknown>()
+@@ -56,47 +99,26 @@ function GitHubImportRoute() {
+ 	>([])
+ 	const [isImportingBatch, setIsImportingBatch] = useState(false)
+ 	const [isPickerExpanded, setIsPickerExpanded] = useState<boolean>()
+-	const selectedRepositoryIds = parseIdList(selectedRepositoryIdsSearch)
+ 	const queuedImportIds = parseIdList(queuedImportIdsSearch)
+ 	const imports = importsQuery.data?.imports ?? []
+ 	const isImportSession = queuedImportIds.length > 0
+ 	const isPickerVisible =
+-		isPickerExpanded ?? (!isImportSession || selectedRepositoryIds.length > 0)
++		isPickerExpanded ??
++		(!isImportSession || selection.selectedRepositoryIds.length > 0)
+ 	const completedImportTarget = getCompletedImportTarget(
+ 		imports,
+ 		queuedImportIds,
+ 		user?.username
+ 	)
+ 
+-	function handleToggleRepository(repositoryId: string) {
++	function handleQueryChange(nextQuery: string | undefined) {
+ 		navigate({
+-			search: previousSearch => ({
+-				...previousSearch,
+-				selectedRepositoryIds: serializeIdList(
+-					toggleSelectedRepositoryId(selectedRepositoryIds, repositoryId)
+-				),
+-			}),
++			search: previousSearch => ({ ...previousSearch, q: nextQuery }),
+ 		})
+ 	}
+ 
+-	function handleSelectAllRepositories() {
+-		const repositoryIds =
+-			repositoriesQuery.data?.repositories.map(
+-				repository => repository.githubId
+-			) ?? []
+-		const allRepositoryIdsSelected =
+-			repositoryIds.length > 0 &&
+-			repositoryIds.every(repositoryId =>
+-				selectedRepositoryIds.includes(repositoryId)
+-			)
+-		const nextRepositoryIds = allRepositoryIdsSelected ? [] : repositoryIds
+-
+-		navigate({
+-			search: previousSearch => ({
+-				...previousSearch,
+-				selectedRepositoryIds: serializeIdList(nextRepositoryIds),
+-			}),
+-		})
++	function handleLoadMore() {
++		repositoriesQuery.fetchNextPage({ cancelRefetch: false })
+ 	}
+ 
+ 	async function handleContinue() {
+@@ -111,7 +133,7 @@ function GitHubImportRoute() {
+ 		let firstImportError: unknown
+ 
+ 		try {
+-			for (const githubId of selectedRepositoryIds) {
++			for (const githubId of selection.selectedRepositoryIds) {
+ 				try {
+ 					const { import: createdImport } =
+ 						await createImportMutation.mutateAsync({ githubId })
+@@ -154,16 +176,25 @@ function GitHubImportRoute() {
+ 	const sourceSelector = (
+ 		<GitHubImportSourceSelector
+ 			error={repositoriesQuery.error}
++			hasNextPage={repositoriesQuery.hasNextPage}
+ 			importError={importError}
+ 			isError={repositoriesQuery.isError}
++			isFetchingNextPage={repositoriesQuery.isFetchingNextPage}
++			isFetchNextPageError={repositoriesQuery.isFetchNextPageError}
+ 			isImporting={isImportingBatch || createImportMutation.isPending}
+ 			isLoading={repositoriesQuery.isLoading}
++			isSearching={repositoriesQuery.isPlaceholderData}
+ 			onContinue={handleContinue}
++			onLoadMore={handleLoadMore}
++			onQueryChange={handleQueryChange}
+ 			onReconnectGitHub={reconnectGitHub}
+-			onSelectAllRepositories={handleSelectAllRepositories}
+-			onToggleRepository={handleToggleRepository}
+-			repositories={repositoriesQuery.data?.repositories ?? []}
+-			selectedRepositoryIds={selectedRepositoryIds}
++			onSelectAllRepositories={selection.selectAllLoaded}
++			onToggleRepository={selection.toggleRepository}
++			pageCount={pages.length}
++			query={q ?? ''}
++			repositories={repositories}
++			selectedRepositories={selection.selectedRepositories}
++			selectedRepositoryIds={selection.selectedRepositoryIds}
+ 		/>
+ 	)
+ 	const importActivity = (
+@@ -259,23 +290,3 @@ function getCompletedImportTarget(
+ 
+ 	return { slug: queuedImport.targetSlug, username }
+ }
+-
+-function parseIdList(ids?: string) {
+-	return ids?.split(',') ?? []
+-}
+-
+-function serializeIdList(ids: string[]) {
+-	return ids.length > 0 ? ids.join(',') : undefined
+-}
+-
+-function toggleSelectedRepositoryId(
+-	selectedRepositoryIds: string[],
+-	repositoryId: string
+-) {
+-	if (selectedRepositoryIds.includes(repositoryId))
+-		return selectedRepositoryIds.filter(
+-			selectedRepositoryId => selectedRepositoryId !== repositoryId
+-		)
+-
+-	return [...selectedRepositoryIds, repositoryId]
+-}
+diff --git a/apps/web/src/modules/pull-requests/components/pull-requests-list-controls.tsx b/apps/web/src/modules/pull-requests/components/pull-requests-list-controls.tsx
+index d99ac620..402e352e 100644
+--- a/apps/web/src/modules/pull-requests/components/pull-requests-list-controls.tsx
++++ b/apps/web/src/modules/pull-requests/components/pull-requests-list-controls.tsx
+@@ -1,6 +1,7 @@
++import { PULL_REQUESTS_SEARCH_MAX_LENGTH } from '@repo/contracts'
++import { SearchInput } from '@/shared/components/search-input'
+ import type { PullRequestsListFilters } from '../helpers/pull-requests-list-search'
+ import { PullRequestsDraftFilter } from './pull-requests-draft-filter'
+-import { PullRequestsSearchInput } from './pull-requests-search-input'
+ import { PullRequestsSortControl } from './pull-requests-sort-control'
+ 
+ interface PullRequestsListControlsProps {
+@@ -15,8 +16,11 @@ export function PullRequestsListControls({
+ }: Readonly<PullRequestsListControlsProps>) {
+ 	return (
+ 		<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+-			<PullRequestsSearchInput
+-				onQueryChange={q => onFiltersChange({ q })}
++			<SearchInput
++				label="Search pull requests"
++				maxLength={PULL_REQUESTS_SEARCH_MAX_LENGTH}
++				onQueryChange={nextQuery => onFiltersChange({ q: nextQuery })}
++				placeholder="Search by number, title, branch, or author"
+ 				query={filters.q ?? ''}
+ 			/>
+ 			<div className="flex flex-wrap items-center gap-2">
+diff --git a/apps/web/src/modules/pull-requests/components/pull-requests-search-input.spec.tsx b/apps/web/src/shared/components/search-input.spec.tsx
+similarity index 54%
+rename from apps/web/src/modules/pull-requests/components/pull-requests-search-input.spec.tsx
+rename to apps/web/src/shared/components/search-input.spec.tsx
+index 8b550681..ca4f1b83 100644
+--- a/apps/web/src/modules/pull-requests/components/pull-requests-search-input.spec.tsx
++++ b/apps/web/src/shared/components/search-input.spec.tsx
+@@ -1,7 +1,11 @@
++import { PULL_REQUESTS_SEARCH_MAX_LENGTH } from '@repo/contracts'
+ import { fireEvent, render, screen } from '@testing-library/react'
+-import { PullRequestsSearchInput } from './pull-requests-search-input'
++import { SearchInput } from './search-input'
+ 
+-describe(PullRequestsSearchInput.name, () => {
++const LABEL = 'Search pull requests'
++const PLACEHOLDER = 'Search by number, title, branch, or author'
++
++describe(SearchInput.name, () => {
+ 	afterEach(() => {
+ 		vi.useRealTimers()
+ 	})
+@@ -9,8 +13,16 @@ describe(PullRequestsSearchInput.name, () => {
+ 	test('flushes a pending debounced search on Enter', () => {
+ 		vi.useFakeTimers()
+ 		const onQueryChange = vi.fn()
+-		render(<PullRequestsSearchInput onQueryChange={onQueryChange} query="" />)
+-		const input = screen.getByRole('textbox', { name: 'Search pull requests' })
++		render(
++			<SearchInput
++				label={LABEL}
++				maxLength={PULL_REQUESTS_SEARCH_MAX_LENGTH}
++				onQueryChange={onQueryChange}
++				placeholder={PLACEHOLDER}
++				query=""
++			/>
++		)
++		const input = screen.getByRole('textbox', { name: LABEL })
+ 
+ 		fireEvent.change(input, { target: { value: '  review  ' } })
+ 		fireEvent.submit(input.closest('form') ?? input)
+@@ -24,7 +36,13 @@ describe(PullRequestsSearchInput.name, () => {
+ 	test('clears the displayed and navigated query immediately', () => {
+ 		const onQueryChange = vi.fn()
+ 		render(
+-			<PullRequestsSearchInput onQueryChange={onQueryChange} query="review" />
++			<SearchInput
++				label={LABEL}
++				maxLength={PULL_REQUESTS_SEARCH_MAX_LENGTH}
++				onQueryChange={onQueryChange}
++				placeholder={PLACEHOLDER}
++				query="review"
++			/>
+ 		)
+ 
+ 		fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+@@ -37,16 +55,28 @@ describe(PullRequestsSearchInput.name, () => {
+ 		vi.useFakeTimers()
+ 		const onQueryChange = vi.fn()
+ 		const { rerender } = render(
+-			<PullRequestsSearchInput onQueryChange={onQueryChange} query="" />
++			<SearchInput
++				label={LABEL}
++				maxLength={PULL_REQUESTS_SEARCH_MAX_LENGTH}
++				onQueryChange={onQueryChange}
++				placeholder={PLACEHOLDER}
++				query=""
++			/>
+ 		)
+-		const input = screen.getByRole('textbox', { name: 'Search pull requests' })
++		const input = screen.getByRole('textbox', { name: LABEL })
+ 
+ 		fireEvent.change(input, { target: { value: 'review ' } })
+ 		vi.advanceTimersByTime(300)
+ 		expect(onQueryChange).toHaveBeenCalledWith('review')
+ 
+ 		rerender(
+-			<PullRequestsSearchInput onQueryChange={onQueryChange} query="review" />
++			<SearchInput
++				label={LABEL}
++				maxLength={PULL_REQUESTS_SEARCH_MAX_LENGTH}
++				onQueryChange={onQueryChange}
++				placeholder={PLACEHOLDER}
++				query="review"
++			/>
+ 		)
+ 		expect(screen.getByRole<HTMLInputElement>('textbox').value).toBe('review ')
+ 	})
+diff --git a/apps/web/src/modules/pull-requests/components/pull-requests-search-input.tsx b/apps/web/src/shared/components/search-input.tsx
+similarity index 69%
+rename from apps/web/src/modules/pull-requests/components/pull-requests-search-input.tsx
+rename to apps/web/src/shared/components/search-input.tsx
+index dfec0806..d3fbf228 100644
+--- a/apps/web/src/modules/pull-requests/components/pull-requests-search-input.tsx
++++ b/apps/web/src/shared/components/search-input.tsx
+@@ -1,4 +1,3 @@
+-import { PULL_REQUESTS_SEARCH_MAX_LENGTH } from '@repo/contracts'
+ import { Button } from '@repo/ui/components/button'
+ import { Input } from '@repo/ui/components/input'
+ import { Search, X } from 'lucide-react'
+@@ -13,7 +12,6 @@ import { useMountEffect } from '@/shared/hooks/use-mount-effect'
+ 
+ const SEARCH_DEBOUNCE_MS = 300
+ 
+-/** What was typed, and the URL query it was typed against. */
+ interface TypedQuery {
+ 	value: string
+ 	against: string
+@@ -25,35 +23,32 @@ function toQuery(value: string): string | undefined {
+ 	return trimmed ? trimmed : undefined
+ }
+ 
+-interface PullRequestsSearchInputProps {
+-	query: string
++interface SearchInputProps {
++	label: string
++	maxLength: number
+ 	onQueryChange: (query: string | undefined) => void
++	placeholder: string
++	query: string
+ }
+ 
+-/**
+- * Navigation is debounced so a search does not put one history entry per
+- * keystroke on the stack. Keystrokes win only until the URL they were typed
+- * against moves; whatever moved it — the debounced navigation itself, Back, or
+- * clearing the filters — the URL is the answer from then on, which is why the
+- * displayed value is derived rather than synchronized.
+- */
+-export function PullRequestsSearchInput({
+-	query,
++// Keystrokes win only until the URL they were typed against moves (debounced nav,
++// Back, or another control); the displayed value is derived from the URL, not synced.
++export function SearchInput({
++	label,
++	maxLength,
+ 	onQueryChange,
+-}: Readonly<PullRequestsSearchInputProps>) {
++	placeholder,
++	query,
++}: Readonly<SearchInputProps>) {
+ 	const inputId = useId()
+ 	const [typed, setTyped] = useState<TypedQuery | undefined>(undefined)
+ 	const debounceTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(
+ 		undefined
+ 	)
+-	// What the URL says right now, readable from inside a pending timer. A timer
+-	// scheduled against an older URL must notice that Back or another control
+-	// has moved it and let the newer state stand instead of navigating over it.
+ 	const currentQuery = useRef(query)
+ 	currentQuery.current = query
+-	// The debounced navigation lands with the typed text trimmed, so equality is
+-	// judged on the trimmed form — otherwise landing mid-word would swallow the
+-	// space between "foo " and the "bar" still being typed.
++	// Equality is judged on the trimmed form, so landing mid-word does not swallow
++	// the space between "foo " and the "bar" still being typed.
+ 	const value =
+ 		typed !== undefined &&
+ 		(typed.against === query || toQuery(typed.value) === toQuery(query))
+@@ -98,7 +93,7 @@ export function PullRequestsSearchInput({
+ 			{/* Submitting flushes the debounce, so Enter searches at once. */}
+ 			<form className="relative" onSubmit={handleSubmit}>
+ 				<label className="sr-only" htmlFor={inputId}>
+-					Search pull requests
++					{label}
+ 				</label>
+ 				<Search
+ 					aria-hidden
+@@ -108,9 +103,9 @@ export function PullRequestsSearchInput({
+ 					autoComplete="off"
+ 					className="px-9"
+ 					id={inputId}
+-					maxLength={PULL_REQUESTS_SEARCH_MAX_LENGTH}
++					maxLength={maxLength}
+ 					onChange={handleChange}
+-					placeholder="Search by number, title, branch, or author"
++					placeholder={placeholder}
+ 					spellCheck={false}
+ 					value={value}
+ 				/>
+diff --git a/packages/contracts/src/github-import.contract.ts b/packages/contracts/src/github-import.contract.ts
+index 0c26c14c..227380e7 100644
+--- a/packages/contracts/src/github-import.contract.ts
++++ b/packages/contracts/src/github-import.contract.ts
+@@ -68,8 +68,28 @@ export type GetGitHubRepositoryImportInput = z.input<
+ 	typeof getGitHubRepositoryImportInputSchema
+ >
+ 
++export const GITHUB_IMPORT_SEARCH_MAX_LENGTH = 200
++
++export const listGitHubImportRepositoriesInputSchema = z.object({
++	page: z.coerce.number().int().positive().default(1),
++	search: z
++		.string()
++		.trim()
++		.min(1)
++		.max(GITHUB_IMPORT_SEARCH_MAX_LENGTH)
++		.optional(),
++})
++export type ListGitHubImportRepositoriesInput = z.input<
++	typeof listGitHubImportRepositoriesInputSchema
++>
++export type ParsedListGitHubImportRepositoriesInput = z.infer<
++	typeof listGitHubImportRepositoriesInputSchema
++>
++
+ export const githubImportRepositoriesOutputSchema = z.object({
+ 	repositories: z.array(githubImportRepositorySchema),
++	/** The page to continue from; absent once GitHub has nothing further. */
++	nextPage: z.number().int().positive().optional(),
+ })
+ export type GitHubImportRepositoriesOutput = z.infer<
+ 	typeof githubImportRepositoriesOutputSchema
+@@ -78,6 +98,7 @@ export type GitHubImportRepositoriesOutput = z.infer<
+ export const githubImportContract = {
+ 	listRepositories: oc
+ 		.route({ method: 'GET', path: '/github-import/repositories' })
++		.input(listGitHubImportRepositoriesInputSchema)
+ 		.output(githubImportRepositoriesOutputSchema),
+ 	createImport: oc
+ 		.route({ method: 'POST', path: '/github-import/imports' })

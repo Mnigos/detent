@@ -1,0 +1,2421 @@
+diff --git a/.changeset/solid-functions-flight.md b/.changeset/solid-functions-flight.md
+new file mode 100644
+index 00000000000..de272fadd25
+--- /dev/null
++++ b/.changeset/solid-functions-flight.md
+@@ -0,0 +1,12 @@
++---
++'@tanstack/solid-router-devtools': patch
++'@tanstack/solid-router-ssr-query': patch
++'@tanstack/solid-router': patch
++'@tanstack/solid-start-client': patch
++'@tanstack/solid-start-server': patch
++'@tanstack/solid-start': patch
++---
++
++Run Solid Start server functions through the Solid 2 server-function runtime, including request handling, serialization, middleware, direct SSR calls, and no-JS forms.
++
++POST server functions now use Solid 2's single-flight transport to return updated Router loader and hydration data with the mutation response.
+diff --git a/benchmarks/memory/server/scenarios/server-fn-churn/shared.ts b/benchmarks/memory/server/scenarios/server-fn-churn/shared.ts
+index 6e2959e757a..a385f28bf50 100644
+--- a/benchmarks/memory/server/scenarios/server-fn-churn/shared.ts
++++ b/benchmarks/memory/server/scenarios/server-fn-churn/shared.ts
+@@ -14,12 +14,18 @@ type FnUrls = {
+   post: string
+ }
+ 
+-type PayloadFixture = {
++export type PayloadFixture = {
+   id: string
+   body: string
+   query: string
+ }
+ 
++export type ServerFnChurnAdapter = {
++  buildGetRequest: (url: string, fixture: PayloadFixture) => Request
++  buildPostRequest: (url: string, fixture: PayloadFixture) => Request
++  validateResponse: (response: Response, request: Request) => void
++}
++
+ type SerovalNode =
+   | {
+       t: 1
+@@ -162,6 +168,12 @@ function validateServerFnResponse(response: Response, request: Request) {
+   }
+ }
+ 
++const tanstackServerFnChurnAdapter: ServerFnChurnAdapter = {
++  buildGetRequest,
++  buildPostRequest,
++  validateResponse: validateServerFnResponse,
++}
++
+ function validateEchoedBody(
+   body: string,
+   request: Request,
+@@ -181,27 +193,29 @@ function validateEchoedBody(
+ async function assertServerFnChurnSanity(
+   handler: StartRequestHandler,
+   urls: FnUrls,
++  adapter: ServerFnChurnAdapter,
+ ) {
+   const getFixture = getFixtures[0]!
+-  const getRequest = buildGetRequest(urls.get, getFixture)
++  const getRequest = adapter.buildGetRequest(urls.get, getFixture)
+   const getResponse = await handler.fetch(getRequest)
+   const getBody = await getResponse.text()
+ 
+-  validateServerFnResponse(getResponse, getRequest)
++  adapter.validateResponse(getResponse, getRequest)
+   validateEchoedBody(getBody, getRequest, getFixture.id)
+ 
+   const postFixture = postFixtures[0]!
+-  const postRequest = buildPostRequest(urls.post, postFixture)
++  const postRequest = adapter.buildPostRequest(urls.post, postFixture)
+   const postResponse = await handler.fetch(postRequest)
+   const postBody = await postResponse.text()
+ 
+-  validateServerFnResponse(postResponse, postRequest)
++  adapter.validateResponse(postResponse, postRequest)
+   validateEchoedBody(postBody, postRequest, postFixture.id)
+ }
+ 
+ export async function createWorkloadGroup(
+   framework: Framework,
+   handler: StartRequestHandler,
++  adapter: ServerFnChurnAdapter = tanstackServerFnChurnAdapter,
+ ) {
+   const urls = await discoverUrls(handler)
+   const run = () =>
+@@ -214,17 +228,17 @@ export async function createWorkloadGroup(
+ 
+         if (index % 2 === 0) {
+           const fixture = getFixtures[fixtureIndex]!
+-          return buildGetRequest(urls.get, fixture)
++          return adapter.buildGetRequest(urls.get, fixture)
+         } else {
+           const fixture = postFixtures[fixtureIndex]!
+-          return buildPostRequest(urls.post, fixture)
++          return adapter.buildPostRequest(urls.post, fixture)
+         }
+       },
+-      validateResponse: validateServerFnResponse,
++      validateResponse: adapter.validateResponse,
+     })
+ 
+   return {
+-    sanity: () => assertServerFnChurnSanity(handler, urls),
++    sanity: () => assertServerFnChurnSanity(handler, urls, adapter),
+     workloads: [
+       {
+         name: `mem server server-fn-churn (${framework})`,
+diff --git a/benchmarks/memory/server/scenarios/server-fn-churn/solid/adapter.ts b/benchmarks/memory/server/scenarios/server-fn-churn/solid/adapter.ts
+new file mode 100644
+index 00000000000..f23735ce8f1
+--- /dev/null
++++ b/benchmarks/memory/server/scenarios/server-fn-churn/solid/adapter.ts
+@@ -0,0 +1,28 @@
++import {
++  createSolidServerFunctionGetRequest,
++  createSolidServerFunctionPostRequest,
++  validateSolidServerFunctionResponse,
++} from '../../../../../solid-server-functions'
++import type { PayloadFixture, ServerFnChurnAdapter } from '../shared'
++
++function buildGetRequest(url: string, fixture: PayloadFixture) {
++  return createSolidServerFunctionGetRequest(
++    url,
++    [{ method: 'GET', data: { id: fixture.id } }],
++    `memory-get:${fixture.id}`,
++  )
++}
++
++function buildPostRequest(url: string, fixture: PayloadFixture) {
++  return createSolidServerFunctionPostRequest(
++    url,
++    [{ method: 'POST', data: { id: fixture.id } }],
++    `memory-post:${fixture.id}`,
++  )
++}
++
++export const solidServerFnChurnAdapter: ServerFnChurnAdapter = {
++  buildGetRequest,
++  buildPostRequest,
++  validateResponse: validateSolidServerFunctionResponse,
++}
+diff --git a/benchmarks/memory/server/scenarios/server-fn-churn/solid/setup.ts b/benchmarks/memory/server/scenarios/server-fn-churn/solid/setup.ts
+index 4fe85c3f009..1a732965b86 100644
+--- a/benchmarks/memory/server/scenarios/server-fn-churn/solid/setup.ts
++++ b/benchmarks/memory/server/scenarios/server-fn-churn/solid/setup.ts
+@@ -1,5 +1,6 @@
+ import type { ServerMemoryWorkloadGroup } from '#memory-server/benchmark'
+ import { createWorkloadGroup } from '../shared.ts'
++import { solidServerFnChurnAdapter } from './adapter'
+ import type { StartRequestHandler } from '../shared.ts'
+ 
+ const appModuleUrl = new URL('./dist/server/server.js', import.meta.url).href
+@@ -11,4 +12,4 @@ const { default: handler } = (await import(
+ }
+ 
+ export const workloadGroup: ServerMemoryWorkloadGroup =
+-  await createWorkloadGroup('solid', handler)
++  await createWorkloadGroup('solid', handler, solidServerFnChurnAdapter)
+diff --git a/benchmarks/solid-server-functions.ts b/benchmarks/solid-server-functions.ts
+new file mode 100644
+index 00000000000..5894fcb74bb
+--- /dev/null
++++ b/benchmarks/solid-server-functions.ts
+@@ -0,0 +1,105 @@
++const origin = 'http://localhost'
++const functionHeader = 'X-Server-Function-Id'
++const instanceHeader = 'X-Server-Function-Instance'
++export const solidServerFunctionFormatHeader = 'X-Server-Function-Format'
++
++type SolidServerFunctionTarget = {
++  endpoint: string
++  id: string
++}
++
++function resolveSolidServerFunctionTarget(
++  url: string,
++): SolidServerFunctionTarget {
++  const parsed = new URL(url, origin)
++  const separator = parsed.pathname.lastIndexOf('/') + 1
++  const id = parsed.pathname.slice(separator)
++
++  if (!id) {
++    throw new Error(`Unable to resolve Solid server function id from ${url}`)
++  }
++
++  return {
++    endpoint: parsed.pathname.slice(0, separator),
++    id: decodeURIComponent(id),
++  }
++}
++
++function createSolidServerFunctionHeaders(id: string, instance: string) {
++  return new Headers({
++    'sec-fetch-site': 'same-origin',
++    [functionHeader]: id,
++    [instanceHeader]: instance,
++  })
++}
++
++export function createSolidServerFunctionGetRequest(
++  url: string,
++  args: Array<unknown>,
++  instance: string,
++) {
++  const { endpoint, id } = resolveSolidServerFunctionTarget(url)
++  const search = new URLSearchParams({
++    id,
++    args: JSON.stringify(args),
++  })
++
++  return new Request(`${origin}${endpoint}?${search}`, {
++    method: 'GET',
++    headers: createSolidServerFunctionHeaders(id, instance),
++  })
++}
++
++export function createSolidServerFunctionPostRequest(
++  url: string,
++  args: Array<unknown>,
++  instance: string,
++) {
++  const { endpoint, id } = resolveSolidServerFunctionTarget(url)
++  const headers = createSolidServerFunctionHeaders(id, instance)
++  headers.set('content-type', 'application/json')
++  headers.set(solidServerFunctionFormatHeader, '8')
++
++  return new Request(`${origin}${endpoint}`, {
++    method: 'POST',
++    headers,
++    body: JSON.stringify(args),
++  })
++}
++
++export function createSolidServerFunctionFormDataRequest(
++  url: string,
++  args: Array<unknown>,
++  body: BodyInit,
++  contentType: string,
++  instance: string,
++) {
++  const { endpoint, id } = resolveSolidServerFunctionTarget(url)
++  const search = new URLSearchParams({ args: JSON.stringify(args) })
++  const headers = createSolidServerFunctionHeaders(id, instance)
++  headers.set('content-type', contentType)
++  headers.set(solidServerFunctionFormatHeader, '2')
++
++  return new Request(`${origin}${endpoint}?${search}`, {
++    method: 'POST',
++    headers,
++    body,
++  })
++}
++
++export function validateSolidServerFunctionResponse(
++  response: Response,
++  request: Request,
++) {
++  if (response.status !== 200) {
++    throw new Error(
++      `Expected status 200 for ${request.url}, got ${response.status}`,
++    )
++  }
++
++  if (!response.headers.has(solidServerFunctionFormatHeader)) {
++    throw new Error(
++      `Expected ${solidServerFunctionFormatHeader} header for ${request.url}`,
++    )
++  }
++}
+diff --git a/benchmarks/ssr/scenarios/global-middleware/bench.ts b/benchmarks/ssr/scenarios/global-middleware/bench.ts
+index a89d03cabb7..047ad6f67b4 100644
+--- a/benchmarks/ssr/scenarios/global-middleware/bench.ts
++++ b/benchmarks/ssr/scenarios/global-middleware/bench.ts
+@@ -25,6 +25,11 @@ type FnUrls = {
+   post: string
+ }
+ 
++export type GlobalMiddlewareBenchAdapter = {
++  responseHeader: string
++  buildPostRequest: (url: string, body: string, index: number) => Request
++}
++
+ export interface GlobalMiddlewareBenchContext {
+   urls: FnUrls
+   bodies: Array<string>
+@@ -54,6 +59,11 @@ const postHeaders = {
+   accept: acceptHeader,
+   'content-type': 'application/json',
+ } satisfies HeadersInit
++const tanstackGlobalMiddlewareBenchAdapter: GlobalMiddlewareBenchAdapter = {
++  responseHeader: xTssSerialized,
++  buildPostRequest: buildTanStackPostRequest,
++}
++let activeGlobalMiddlewareBenchAdapter = tanstackGlobalMiddlewareBenchAdapter
+ const documentLoopTotalRequests = 64
+ const serverFnLoopTotalRequests = 128
+ const serverRouteLoopTotalRequests = 256
+@@ -130,16 +140,26 @@ function buildServerRouteRequest(random: () => number, index: number) {
+ }
+ 
+ function buildPostRequest(urls: FnUrls, bodies: Array<string>, index: number) {
+-  return new Request(`${origin}${urls.post}`, {
++  return activeGlobalMiddlewareBenchAdapter.buildPostRequest(
++    urls.post,
++    bodies[index % bodies.length]!,
++    index,
++  )
++}
++
++function buildTanStackPostRequest(url: string, body: string) {
++  return new Request(`${origin}${url}`, {
+     method: 'POST',
+     headers: postHeaders,
+-    body: bodies[index % bodies.length],
++    body,
+   })
+ }
+ 
+ export async function setupGlobalMiddlewareBench(
+   handler: StartRequestHandler,
++  adapter: GlobalMiddlewareBenchAdapter = tanstackGlobalMiddlewareBenchAdapter,
+ ): Promise<GlobalMiddlewareBenchContext> {
++  activeGlobalMiddlewareBenchAdapter = adapter
+   const urls = await discoverUrls(handler)
+   const payloads = createPayloads()
+   const bodies = await createBodies(payloads)
+@@ -240,8 +260,12 @@ async function assertServerFnResponse(
+     )
+   }
+ 
+-  if (!response.headers.get(xTssSerialized)) {
+-    throw new Error(`Server function response missing ${xTssSerialized} header`)
++  if (
++    !response.headers.get(activeGlobalMiddlewareBenchAdapter.responseHeader)
++  ) {
++    throw new Error(
++      `Server function response missing ${activeGlobalMiddlewareBenchAdapter.responseHeader} header`,
++    )
+   }
+ 
+   if (!text.includes(context.expectedFnMarker)) {
+diff --git a/benchmarks/ssr/scenarios/global-middleware/solid/adapter.ts b/benchmarks/ssr/scenarios/global-middleware/solid/adapter.ts
+new file mode 100644
+index 00000000000..c45a19418ac
+--- /dev/null
++++ b/benchmarks/ssr/scenarios/global-middleware/solid/adapter.ts
+@@ -0,0 +1,25 @@
++import { fromJSON } from 'seroval'
++import {
++  createSolidServerFunctionPostRequest,
++  solidServerFunctionFormatHeader,
++} from '../../../../solid-server-functions'
++import type { GlobalMiddlewareBenchAdapter } from '../bench'
++import type { SerovalJSON } from 'seroval'
++
++function buildPostRequest(url: string, body: string, index: number) {
++  const payload = fromJSON(JSON.parse(body) as SerovalJSON, {}) as Record<
++    string,
++    unknown
++  >
++
++  return createSolidServerFunctionPostRequest(
++    url,
++    [{ ...payload, method: 'POST' }],
++    `global-middleware:${index}`,
++  )
++}
++
++export const solidGlobalMiddlewareBenchAdapter: GlobalMiddlewareBenchAdapter = {
++  responseHeader: solidServerFunctionFormatHeader,
++  buildPostRequest,
++}
+diff --git a/benchmarks/ssr/scenarios/global-middleware/solid/speed.bench.ts b/benchmarks/ssr/scenarios/global-middleware/solid/speed.bench.ts
+index 019735eb40d..2169353e853 100644
+--- a/benchmarks/ssr/scenarios/global-middleware/solid/speed.bench.ts
++++ b/benchmarks/ssr/scenarios/global-middleware/solid/speed.bench.ts
+@@ -8,6 +8,7 @@ import {
+   setupGlobalMiddlewareBench,
+ } from '../bench'
+ import type { StartRequestHandler } from '../bench'
++import { solidGlobalMiddlewareBenchAdapter } from './adapter'
+ 
+ const appModuleUrl = new URL('./dist/server/server.js', import.meta.url).href
+ 
+@@ -17,7 +18,10 @@ const { default: handler } = (await import(
+   default: StartRequestHandler
+ }
+ 
+-const context = await setupGlobalMiddlewareBench(handler)
++const context = await setupGlobalMiddlewareBench(
++  handler,
++  solidGlobalMiddlewareBenchAdapter,
++)
+ 
+ await assertGlobalMiddlewareScenario(handler, context)
+ 
+diff --git a/benchmarks/ssr/scenarios/server-fn-transport/bench.ts b/benchmarks/ssr/scenarios/server-fn-transport/bench.ts
+index 4274c724ca0..33de0fc1668 100644
+--- a/benchmarks/ssr/scenarios/server-fn-transport/bench.ts
++++ b/benchmarks/ssr/scenarios/server-fn-transport/bench.ts
+@@ -22,16 +22,35 @@ type MultipartPayloadSpec = {
+   fileContents: string
+ }
+ 
+-type MultipartPayload = MultipartPayloadSpec & {
++export type MultipartPayload = MultipartPayloadSpec & {
+   body: ArrayBuffer
+   contentType: string
+ }
+ 
+-type QueryPayload = {
++export type QueryPayload = {
+   query: string
+   expectedBody: string
+ }
+ 
++export type ServerFnTransportBenchAdapter = {
++  responseHeader: string
++  buildMultipartRequest: (
++    url: string,
++    payload: MultipartPayload,
++    index: number,
++  ) => Request
++  buildGetRequest: (
++    url: string,
++    payload: QueryPayload,
++    index: number,
++  ) => Request
++  assertRawResponse: (response: Response, expectedBody: string) => Promise<void>
++  assertRawStream: (response: Response, expectedLabel: string) => Promise<void>
++  validateSerializedResponse: (response: Response, request: Request) => void
++  validateRawResponse: (response: Response, request: Request) => void
++  validateRawStreamResponse: (response: Response, request: Request) => void
++}
++
+ type FrameStats = {
+   jsonFrames: number
+   chunkFrames: number
+@@ -67,6 +86,17 @@ const commonHeaders = {
+   'sec-fetch-site': 'same-origin',
+   accept: acceptHeader,
+ } satisfies HeadersInit
++const tanstackServerFnTransportBenchAdapter: ServerFnTransportBenchAdapter = {
++  responseHeader: xTssSerialized,
++  buildMultipartRequest: buildTanStackMultipartRequest,
++  buildGetRequest: buildTanStackGetRequest,
++  assertRawResponse,
++  assertRawStream,
++  validateSerializedResponse,
++  validateRawResponse,
++  validateRawStreamResponse,
++}
++let activeServerFnTransportBenchAdapter = tanstackServerFnTransportBenchAdapter
+ const serverFnMultipartLoopTotalRequests = 128
+ const serverFnRawResponseLoopTotalRequests = 176
+ const serverFnRawStreamLoopTotalRequests = 112
+@@ -205,7 +235,15 @@ function buildMultipartRequest(
+ ) {
+   const payload = payloads[index % payloads.length]!
+ 
+-  return new Request(`${origin}${urls.form}`, {
++  return activeServerFnTransportBenchAdapter.buildMultipartRequest(
++    urls.form,
++    payload,
++    index,
++  )
++}
++
++function buildTanStackMultipartRequest(url: string, payload: MultipartPayload) {
++  return new Request(`${origin}${url}`, {
+     method: 'POST',
+     headers: {
+       ...commonHeaders,
+@@ -222,7 +260,15 @@ function buildRawResponseRequest(
+ ) {
+   const payload = payloads[index % payloads.length]!
+ 
+-  return new Request(`${origin}${urls.raw}${payload.query}`, {
++  return activeServerFnTransportBenchAdapter.buildGetRequest(
++    urls.raw,
++    payload,
++    index,
++  )
++}
++
++function buildTanStackGetRequest(url: string, payload: QueryPayload) {
++  return new Request(`${origin}${url}${payload.query}`, {
+     method: 'GET',
+     headers: commonHeaders,
+   })
+@@ -235,10 +281,11 @@ function buildRawStreamRequest(
+ ) {
+   const payload = payloads[index % payloads.length]!
+ 
+-  return new Request(`${origin}${urls.stream}${payload.query}`, {
+-    method: 'GET',
+-    headers: commonHeaders,
+-  })
++  return activeServerFnTransportBenchAdapter.buildGetRequest(
++    urls.stream,
++    payload,
++    index,
++  )
+ }
+ 
+ async function assertSerializedResponse({
+@@ -268,8 +315,12 @@ async function assertSerializedResponse({
+     )
+   }
+ 
+-  if (!response.headers.get(xTssSerialized)) {
+-    throw new Error(`${label} sanity check missing ${xTssSerialized} header`)
++  if (
++    !response.headers.get(activeServerFnTransportBenchAdapter.responseHeader)
++  ) {
++    throw new Error(
++      `${label} sanity check missing ${activeServerFnTransportBenchAdapter.responseHeader} header`,
++    )
+   }
+ 
+   return text
+@@ -459,7 +510,9 @@ function validateRawStreamResponse(response: Response, request: Request) {
+ 
+ export async function setupServerFnTransportBench(
+   handler: StartRequestHandler,
++  adapter: ServerFnTransportBenchAdapter = tanstackServerFnTransportBenchAdapter,
+ ) {
++  activeServerFnTransportBenchAdapter = adapter
+   const urls = await discoverUrls(handler)
+   const multipartPayloads = await createMultipartPayloads()
+   const rawPayloads = await createQueryPayloads(
+@@ -499,17 +552,18 @@ export async function assertServerFnTransportScenario(
+   })
+   assertMultipartBody(multipartText, multipartPayload)
+ 
+-  await assertRawResponse(
++  await activeServerFnTransportBenchAdapter.assertRawResponse(
+     await handler.fetch(
+       buildRawResponseRequest(context.urls, context.rawPayloads, 0),
+     ),
+     context.rawPayloads[0]!.expectedBody,
+   )
+ 
+-  await assertRawStream(
++  await activeServerFnTransportBenchAdapter.assertRawStream(
+     await handler.fetch(
+       buildRawStreamRequest(context.urls, context.streamPayloads, 0),
+     ),
++    context.streamPayloads[0]!.expectedBody,
+   )
+ }
+ 
+@@ -523,7 +577,8 @@ export function runServerFnMultipartRequestLoop(
+     totalRequests: serverFnMultipartLoopTotalRequests,
+     buildRequest: (_random, index) =>
+       buildMultipartRequest(context.urls, context.multipartPayloads, index),
+-    validateResponse: validateSerializedResponse,
++    validateResponse:
++      activeServerFnTransportBenchAdapter.validateSerializedResponse,
+   })
+ }
+ 
+@@ -537,7 +592,7 @@ export function runServerFnRawResponseRequestLoop(
+     totalRequests: serverFnRawResponseLoopTotalRequests,
+     buildRequest: (_random, index) =>
+       buildRawResponseRequest(context.urls, context.rawPayloads, index),
+-    validateResponse: validateRawResponse,
++    validateResponse: activeServerFnTransportBenchAdapter.validateRawResponse,
+   })
+ }
+ 
+@@ -551,6 +606,7 @@ export function runServerFnRawStreamRequestLoop(
+     totalRequests: serverFnRawStreamLoopTotalRequests,
+     buildRequest: (_random, index) =>
+       buildRawStreamRequest(context.urls, context.streamPayloads, index),
+-    validateResponse: validateRawStreamResponse,
++    validateResponse:
++      activeServerFnTransportBenchAdapter.validateRawStreamResponse,
+   })
+ }
+diff --git a/benchmarks/ssr/scenarios/server-fn-transport/solid/adapter.ts b/benchmarks/ssr/scenarios/server-fn-transport/solid/adapter.ts
+new file mode 100644
+index 00000000000..a72dda6f269
+--- /dev/null
++++ b/benchmarks/ssr/scenarios/server-fn-transport/solid/adapter.ts
+@@ -0,0 +1,128 @@
++import { fromJSON } from 'seroval'
++import { decodeResponse } from '@solidjs/web/server-functions/client'
++import {
++  createSolidServerFunctionFormDataRequest,
++  createSolidServerFunctionGetRequest,
++  solidServerFunctionFormatHeader,
++  validateSolidServerFunctionResponse,
++} from '../../../../solid-server-functions'
++import type {
++  MultipartPayload,
++  QueryPayload,
++  ServerFnTransportBenchAdapter,
++} from '../bench'
++import type { SerovalJSON } from 'seroval'
++
++const streamChunkCount = 8
++const streamChunkSize = 1024
++
++function decodePayload(query: string) {
++  const body = new URLSearchParams(query).get('payload')
++  if (!body) {
++    throw new Error('Solid server function GET fixture is missing its payload')
++  }
++
++  return fromJSON(JSON.parse(body) as SerovalJSON, {}) as Record<
++    string,
++    unknown
++  >
++}
++
++function buildMultipartRequest(
++  url: string,
++  payload: MultipartPayload,
++  index: number,
++) {
++  return createSolidServerFunctionFormDataRequest(
++    url,
++    [{ method: 'POST' }],
++    payload.body,
++    payload.contentType,
++    `transport-form:${index}`,
++  )
++}
++
++function buildGetRequest(url: string, payload: QueryPayload, index: number) {
++  return createSolidServerFunctionGetRequest(
++    url,
++    [{ ...decodePayload(payload.query), method: 'GET' }],
++    `transport-get:${index}`,
++  )
++}
++
++async function assertRawResponse(response: Response, expectedBody: string) {
++  validateSolidServerFunctionResponse(
++    response,
++    new Request('http://localhost/_serverFn/'),
++  )
++  const decoded = (await decodeResponse(response)) as {
++    result?: unknown
++  }
++
++  if (!(decoded.result instanceof Response)) {
++    throw new Error('raw-response sanity check expected a Response result')
++  }
++
++  const body = await decoded.result.text()
++  if (body !== expectedBody) {
++    throw new Error(
++      `raw-response sanity check expected ${expectedBody}, received ${body}`,
++    )
++  }
++}
++
++async function assertRawStream(response: Response, expectedLabel: string) {
++  validateSolidServerFunctionResponse(
++    response,
++    new Request('http://localhost/_serverFn/'),
++  )
++  const decoded = (await decodeResponse(response)) as {
++    result?: {
++      label?: string
++      data?: ReadableStream<Uint8Array>
++    }
++  }
++  const result = decoded.result
++
++  if (result?.label !== expectedLabel) {
++    throw new Error(
++      `raw-stream sanity check expected label ${expectedLabel}, received ${result?.label}`,
++    )
++  }
++
++  if (!(result.data instanceof ReadableStream)) {
++    throw new Error('raw-stream sanity check expected a ReadableStream')
++  }
++
++  const reader = result.data.getReader()
++  let chunks = 0
++  let bytes = 0
++
++  while (true) {
++    const chunk = await reader.read()
++    if (chunk.done) {
++      break
++    }
++    chunks++
++    bytes += chunk.value.byteLength
++  }
++
++  const expectedBytes = streamChunkCount * streamChunkSize
++  if (chunks !== streamChunkCount || bytes !== expectedBytes) {
++    throw new Error(
++      `raw-stream sanity check expected ${streamChunkCount} chunks and ${expectedBytes} bytes, received ${chunks} chunks and ${bytes} bytes`,
++    )
++  }
++}
++
++export const solidServerFnTransportBenchAdapter: ServerFnTransportBenchAdapter =
++  {
++    responseHeader: solidServerFunctionFormatHeader,
++    buildMultipartRequest,
++    buildGetRequest,
++    assertRawResponse,
++    assertRawStream,
++    validateSerializedResponse: validateSolidServerFunctionResponse,
++    validateRawResponse: validateSolidServerFunctionResponse,
++    validateRawStreamResponse: validateSolidServerFunctionResponse,
++  }
+diff --git a/benchmarks/ssr/scenarios/server-fn-transport/solid/speed.bench.ts b/benchmarks/ssr/scenarios/server-fn-transport/solid/speed.bench.ts
+index b93d7d79a9d..e604eb68aec 100644
+--- a/benchmarks/ssr/scenarios/server-fn-transport/solid/speed.bench.ts
++++ b/benchmarks/ssr/scenarios/server-fn-transport/solid/speed.bench.ts
+@@ -8,6 +8,7 @@ import {
+   setupServerFnTransportBench,
+ } from '../bench'
+ import type { StartRequestHandler } from '../bench'
++import { solidServerFnTransportBenchAdapter } from './adapter'
+ 
+ const { default: handler } = (await import(
+   /* @vite-ignore */ new URL('./dist/server/server.js', import.meta.url).href
+@@ -15,7 +16,10 @@ const { default: handler } = (await import(
+   default: StartRequestHandler
+ }
+ 
+-const context = await setupServerFnTransportBench(handler)
++const context = await setupServerFnTransportBench(
++  handler,
++  solidServerFnTransportBenchAdapter,
++)
+ 
+ await assertServerFnTransportScenario(handler, context)
+ 
+diff --git a/benchmarks/ssr/scenarios/server-fn-transport/solid/src/fns.ts b/benchmarks/ssr/scenarios/server-fn-transport/solid/src/fns.ts
+index 3c586fa2eef..3ae0bef8adb 100644
+--- a/benchmarks/ssr/scenarios/server-fn-transport/solid/src/fns.ts
++++ b/benchmarks/ssr/scenarios/server-fn-transport/solid/src/fns.ts
+@@ -1,4 +1,4 @@
+-import { RawStream, createServerFn } from '@tanstack/solid-start'
++import { createServerFn } from '@tanstack/solid-start'
+ 
+ type FormEchoData = {
+   alpha: string
+@@ -96,6 +96,6 @@ export const streamOut = createServerFn({ method: 'GET' })
+   .handler(({ data }) => {
+     return {
+       label: `stream-${data}`,
+-      data: new RawStream(createDeterministicStream(data)),
++      data: createDeterministicStream(data),
+     }
+   })
+diff --git a/benchmarks/ssr/scenarios/server-fns/bench.ts b/benchmarks/ssr/scenarios/server-fns/bench.ts
+index 1461ce2bfd7..54f2d86b588 100644
+--- a/benchmarks/ssr/scenarios/server-fns/bench.ts
++++ b/benchmarks/ssr/scenarios/server-fns/bench.ts
+@@ -23,6 +23,13 @@ type FnUrls = {
+   context: string
+ }
+ 
++export type ServerFnBenchAdapter = {
++  responseHeader: string
++  decodeResponse: (json: unknown) => unknown
++  buildGetRequest: (url: string, query: string, index: number) => Request
++  buildPostRequest: (url: string, body: string, index: number) => Request
++}
++
+ export type ServerFnBenchContext = {
+   urls: FnUrls
+   bodies: Array<string>
+@@ -47,6 +54,13 @@ const postHeaders = {
+   ...commonHeaders,
+   'content-type': 'application/json',
+ } satisfies HeadersInit
++const tanstackServerFnBenchAdapter: ServerFnBenchAdapter = {
++  responseHeader: xTssSerialized,
++  decodeResponse: (json) => fromCrossJSON(json as SerovalNode, {}),
++  buildGetRequest: buildTanStackGetRequest,
++  buildPostRequest: buildTanStackPostRequest,
++}
++let activeServerFnBenchAdapter = tanstackServerFnBenchAdapter
+ const documentRequestInit = {
+   method: 'GET',
+   headers: {
+@@ -167,8 +181,10 @@ function validateSerializedResponse(response: Response, label: string) {
+     throw new Error(`${label} request failed with status ${response.status}`)
+   }
+ 
+-  if (!response.headers.get(xTssSerialized)) {
+-    throw new Error(`${label} response missing ${xTssSerialized} header`)
++  if (!response.headers.get(activeServerFnBenchAdapter.responseHeader)) {
++    throw new Error(
++      `${label} response missing ${activeServerFnBenchAdapter.responseHeader} header`,
++    )
+   }
+ }
+ 
+@@ -211,7 +227,7 @@ async function readSerializedServerFnResult(response: Response, label: string) {
+     })
+   }
+ 
+-  return { text, decoded: fromCrossJSON(json as SerovalNode, {}) }
++  return { text, decoded: activeServerFnBenchAdapter.decodeResponse(json) }
+ }
+ 
+ async function assertServerFnResponse({
+@@ -243,12 +259,14 @@ async function assertServerFnRedirectResponse(response: Response) {
+ 
+   let payload: {
+     href?: string
++    to?: string
+     isSerializedRedirect?: boolean
+     statusCode?: number
+   }
+ 
+   try {
+-    payload = JSON.parse(text) as typeof payload
++    const json = JSON.parse(text) as typeof payload & { error?: typeof payload }
++    payload = json.error ?? json
+   } catch (error) {
+     throw new Error(`redirect sanity check returned invalid JSON: ${text}`, {
+       cause: error,
+@@ -256,7 +274,7 @@ async function assertServerFnRedirectResponse(response: Response) {
+   }
+ 
+   if (
+-    payload.href !== '/' ||
++    (payload.href ?? payload.to) !== '/' ||
+     payload.statusCode !== 307 ||
+     payload.isSerializedRedirect !== true
+   ) {
+@@ -340,7 +358,15 @@ async function assertDocumentServerFnCallResponse(response: Response) {
+ }
+ 
+ function buildGetRequest(urls: FnUrls, queries: Array<string>, index: number) {
+-  return new Request(`${origin}${urls.get}${queries[index % queries.length]}`, {
++  return activeServerFnBenchAdapter.buildGetRequest(
++    urls.get,
++    queries[index % queries.length]!,
++    index,
++  )
++}
++
++function buildTanStackGetRequest(url: string, query: string) {
++  return new Request(`${origin}${url}${query}`, {
+     method: 'GET',
+     headers: commonHeaders,
+   })
+@@ -351,10 +377,18 @@ function buildPostUrlRequest(
+   bodies: Array<string>,
+   index: number,
+ ) {
++  return activeServerFnBenchAdapter.buildPostRequest(
++    url,
++    bodies[index % bodies.length]!,
++    index,
++  )
++}
++
++function buildTanStackPostRequest(url: string, body: string) {
+   return new Request(`${origin}${url}`, {
+     method: 'POST',
+     headers: postHeaders,
+-    body: bodies[index % bodies.length],
++    body,
+   })
+ }
+ 
+@@ -393,7 +427,11 @@ function buildSsrCallRequest(random: () => number) {
+   )
+ }
+ 
+-export async function setupServerFnBench(handler: StartRequestHandler) {
++export async function setupServerFnBench(
++  handler: StartRequestHandler,
++  adapter: ServerFnBenchAdapter = tanstackServerFnBenchAdapter,
++) {
++  activeServerFnBenchAdapter = adapter
+   const urls = await discoverUrls(handler)
+   const payloads = createPayloads()
+   const bodies = await createBodies(payloads)
+diff --git a/benchmarks/ssr/scenarios/server-fns/solid/adapter.ts b/benchmarks/ssr/scenarios/server-fns/solid/adapter.ts
+new file mode 100644
+index 00000000000..9b0df9a146a
+--- /dev/null
++++ b/benchmarks/ssr/scenarios/server-fns/solid/adapter.ts
+@@ -0,0 +1,43 @@
++import { fromJSON } from 'seroval'
++import {
++  createSolidServerFunctionGetRequest,
++  createSolidServerFunctionPostRequest,
++  solidServerFunctionFormatHeader,
++} from '../../../../solid-server-functions'
++import type { ServerFnBenchAdapter } from '../bench'
++import type { SerovalJSON } from 'seroval'
++
++function decodePayload(body: string) {
++  return fromJSON(JSON.parse(body) as SerovalJSON, {}) as Record<
++    string,
++    unknown
++  >
++}
++
++function buildGetRequest(url: string, query: string, index: number) {
++  const body = new URLSearchParams(query).get('payload')
++  if (!body) {
++    throw new Error('Solid server function GET fixture is missing its payload')
++  }
++
++  return createSolidServerFunctionGetRequest(
++    url,
++    [{ ...decodePayload(body), method: 'GET' }],
++    `ssr-get:${index}`,
++  )
++}
++
++function buildPostRequest(url: string, body: string, index: number) {
++  return createSolidServerFunctionPostRequest(
++    url,
++    [{ ...decodePayload(body), method: 'POST' }],
++    `ssr-post:${index}`,
++  )
++}
++
++export const solidServerFnBenchAdapter: ServerFnBenchAdapter = {
++  responseHeader: solidServerFunctionFormatHeader,
++  decodeResponse: (json) => json,
++  buildGetRequest,
++  buildPostRequest,
++}
+diff --git a/benchmarks/ssr/scenarios/server-fns/solid/speed.bench.ts b/benchmarks/ssr/scenarios/server-fns/solid/speed.bench.ts
+index a116ea9102a..63d97703e6f 100644
+--- a/benchmarks/ssr/scenarios/server-fns/solid/speed.bench.ts
++++ b/benchmarks/ssr/scenarios/server-fns/solid/speed.bench.ts
+@@ -11,6 +11,7 @@ import {
+   setupServerFnBench,
+ } from '../bench'
+ import type { StartRequestHandler } from '../bench'
++import { solidServerFnBenchAdapter } from './adapter'
+ 
+ const { default: handler } = (await import(
+   /* @vite-ignore */ new URL('./dist/server/server.js', import.meta.url).href
+@@ -18,7 +19,7 @@ const { default: handler } = (await import(
+   default: StartRequestHandler
+ }
+ 
+-const context = await setupServerFnBench(handler)
++const context = await setupServerFnBench(handler, solidServerFnBenchAdapter)
+ 
+ await assertServerFnScenario(handler, context)
+ 
+diff --git a/e2e/solid-start/server-functions/src/routeTree.gen.ts b/e2e/solid-start/server-functions/src/routeTree.gen.ts
+index 2d3b197b773..ce37816a7a1 100644
+--- a/e2e/solid-start/server-functions/src/routeTree.gen.ts
++++ b/e2e/solid-start/server-functions/src/routeTree.gen.ts
+@@ -19,6 +19,7 @@ import { Route as MultipartRouteImport } from './routes/multipart'
+ import { Route as RawResponseRouteImport } from './routes/raw-response'
+ import { Route as ReturnNullRouteImport } from './routes/return-null'
+ import { Route as SerializeFormDataRouteImport } from './routes/serialize-form-data'
++import { Route as SingleFlightRouteImport } from './routes/single-flight'
+ import { Route as StatusRouteImport } from './routes/status'
+ import { Route as SubmitPostFormdataRouteImport } from './routes/submit-post-formdata'
+ import { Route as AbortSignalIndexRouteImport } from './routes/abort-signal/index'
+@@ -90,6 +91,11 @@ const SerializeFormDataRoute = SerializeFormDataRouteImport.update({
+   path: '/serialize-form-data',
+   getParentRoute: () => rootRouteImport,
+ } as any)
++const SingleFlightRoute = SingleFlightRouteImport.update({
++  id: '/single-flight',
++  path: '/single-flight',
++  getParentRoute: () => rootRouteImport,
++} as any)
+ const StatusRoute = StatusRouteImport.update({
+   id: '/status',
+   path: '/status',
+@@ -205,6 +211,7 @@ export interface FileRoutesByFullPath {
+   '/raw-response': typeof RawResponseRoute
+   '/return-null': typeof ReturnNullRoute
+   '/serialize-form-data': typeof SerializeFormDataRoute
++  '/single-flight': typeof SingleFlightRoute
+   '/status': typeof StatusRoute
+   '/submit-post-formdata': typeof SubmitPostFormdataRoute
+   '/abort-signal/$method': typeof AbortSignalMethodRoute
+@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
+   '/raw-response': typeof RawResponseRoute
+   '/return-null': typeof ReturnNullRoute
+   '/serialize-form-data': typeof SerializeFormDataRoute
++  '/single-flight': typeof SingleFlightRoute
+   '/status': typeof StatusRoute
+   '/submit-post-formdata': typeof SubmitPostFormdataRoute
+   '/abort-signal/$method': typeof AbortSignalMethodRoute
+@@ -270,6 +278,7 @@ export interface FileRoutesById {
+   '/raw-response': typeof RawResponseRoute
+   '/return-null': typeof ReturnNullRoute
+   '/serialize-form-data': typeof SerializeFormDataRoute
++  '/single-flight': typeof SingleFlightRoute
+   '/status': typeof StatusRoute
+   '/submit-post-formdata': typeof SubmitPostFormdataRoute
+   '/abort-signal/$method': typeof AbortSignalMethodRoute
+@@ -304,6 +313,7 @@ export interface FileRouteTypes {
+     | '/raw-response'
+     | '/return-null'
+     | '/serialize-form-data'
++    | '/single-flight'
+     | '/status'
+     | '/submit-post-formdata'
+     | '/abort-signal/$method'
+@@ -336,6 +346,7 @@ export interface FileRouteTypes {
+     | '/raw-response'
+     | '/return-null'
+     | '/serialize-form-data'
++    | '/single-flight'
+     | '/status'
+     | '/submit-post-formdata'
+     | '/abort-signal/$method'
+@@ -368,6 +379,7 @@ export interface FileRouteTypes {
+     | '/raw-response'
+     | '/return-null'
+     | '/serialize-form-data'
++    | '/single-flight'
+     | '/status'
+     | '/submit-post-formdata'
+     | '/abort-signal/$method'
+@@ -401,6 +413,7 @@ export interface RootRouteChildren {
+   RawResponseRoute: typeof RawResponseRoute
+   ReturnNullRoute: typeof ReturnNullRoute
+   SerializeFormDataRoute: typeof SerializeFormDataRoute
++  SingleFlightRoute: typeof SingleFlightRoute
+   StatusRoute: typeof StatusRoute
+   SubmitPostFormdataRoute: typeof SubmitPostFormdataRoute
+   AbortSignalMethodRoute: typeof AbortSignalMethodRoute
+@@ -495,6 +508,13 @@ declare module '@tanstack/solid-router' {
+       preLoaderRoute: typeof SerializeFormDataRouteImport
+       parentRoute: typeof rootRouteImport
+     }
++    '/single-flight': {
++      id: '/single-flight'
++      path: '/single-flight'
++      fullPath: '/single-flight'
++      preLoaderRoute: typeof SingleFlightRouteImport
++      parentRoute: typeof rootRouteImport
++    }
+     '/status': {
+       id: '/status'
+       path: '/status'
+@@ -649,6 +669,7 @@ const rootRouteChildren: RootRouteChildren = {
+   RawResponseRoute: RawResponseRoute,
+   ReturnNullRoute: ReturnNullRoute,
+   SerializeFormDataRoute: SerializeFormDataRoute,
++  SingleFlightRoute: SingleFlightRoute,
+   StatusRoute: StatusRoute,
+   SubmitPostFormdataRoute: SubmitPostFormdataRoute,
+   AbortSignalMethodRoute: AbortSignalMethodRoute,
+diff --git a/e2e/solid-start/server-functions/src/routes/single-flight.tsx b/e2e/solid-start/server-functions/src/routes/single-flight.tsx
+new file mode 100644
+index 00000000000..e7f2bd4bca5
+--- /dev/null
++++ b/e2e/solid-start/server-functions/src/routes/single-flight.tsx
+@@ -0,0 +1,36 @@
++import { createFileRoute } from '@tanstack/solid-router'
++import { createServerFn } from '@tanstack/solid-start'
++
++let count = 0
++let reads = 0
++
++const readCount = createServerFn().handler(() => {
++  return { count, reads: ++reads }
++})
++
++const incrementCount = createServerFn({ method: 'POST' }).handler(() => {
++  return ++count
++})
++
++export const Route = createFileRoute('/single-flight')({
++  loader: () => readCount(),
++  component: SingleFlight,
++})
++
++function SingleFlight() {
++  const data = Route.useLoaderData()
++
++  return (
++    <main>
++      <p data-testid="single-flight-count">{data().count}</p>
++      <p data-testid="single-flight-reads">{data().reads}</p>
++      <button
++        type="button"
++        data-testid="single-flight-mutate"
++        onClick={() => incrementCount()}
++      >
++        Increment
++      </button>
++    </main>
++  )
++}
+diff --git a/e2e/solid-start/server-functions/tests/server-functions.spec.ts b/e2e/solid-start/server-functions/tests/server-functions.spec.ts
+index 115ac1e5542..f66873941fa 100644
+--- a/e2e/solid-start/server-functions/tests/server-functions.spec.ts
++++ b/e2e/solid-start/server-functions/tests/server-functions.spec.ts
+@@ -162,6 +162,52 @@ test('Server function can return null for GET and POST calls', async ({
+   ).toContainText(JSON.stringify(null))
+ })
+ 
++test('POST server functions return single-flight loader data', async ({
++  page,
++}) => {
++  await page.goto('/single-flight')
++  await page.waitForLoadState('networkidle')
++
++  const initialCount = Number(
++    await page.getByTestId('single-flight-count').textContent(),
++  )
++  const initialReads = Number(
++    await page.getByTestId('single-flight-reads').textContent(),
++  )
++  const dataRequests: Array<{ method: string; url: string }> = []
++
++  page.on('request', (request) => {
++    if (['fetch', 'xhr'].includes(request.resourceType())) {
++      dataRequests.push({
++        method: request.method(),
++        url: request.url(),
++      })
++    }
++  })
++
++  const responsePromise = page.waitForResponse((response) =>
++    response.url().includes('/_serverFn/'),
++  )
++  await page.getByTestId('single-flight-mutate').click()
++  const response = await responsePromise
++
++  expect(response.request().headers()['x-single-flight']).toBe('true')
++  expect(response.headers()['x-single-flight']).toBe('true')
++
++  await expect(page.getByTestId('single-flight-count')).toHaveText(
++    String(initialCount + 1),
++  )
++  await expect(page.getByTestId('single-flight-reads')).toHaveText(
++    String(initialReads + 1),
++  )
++  expect(dataRequests).toEqual([
++    {
++      method: 'POST',
++      url: expect.stringContaining('/_serverFn/'),
++    },
++  ])
++})
++
+ test('Server function can correctly send and receive FormData', async ({
+   page,
+ }) => {
+@@ -290,7 +336,9 @@ test.describe('server function sets cookies', () => {
+       expect(errorMessage).toBe('$undefined')
+     })
+ 
+-    test('aborting', async ({ page }) => {
++    // Solid 2 does not yet expose a per-call AbortSignal transport seam.
++    // https://github.com/solidjs/solid/issues/3057
++    test.skip('aborting', async ({ page }) => {
+       await page.goto('/abort-signal/' + method)
+       await page.waitForLoadState('networkidle')
+ 
+diff --git a/packages/solid-start/package.json b/packages/solid-start/package.json
+index 97e9dc937d7..1ec49ceab13 100644
+--- a/packages/solid-start/package.json
++++ b/packages/solid-start/package.json
+@@ -74,6 +74,18 @@
+         "default": "./dist/esm/server.js"
+       }
+     },
++    "./server-functions-handler": {
++      "import": {
++        "types": "./dist/esm/server-functions-handler.d.ts",
++        "default": "./dist/esm/server-functions-handler.js"
++      }
++    },
++    "./createSolidStartHandler": {
++      "import": {
++        "types": "./dist/esm/createSolidStartHandler.d.ts",
++        "default": "./dist/esm/createSolidStartHandler.js"
++      }
++    },
+     "./plugin/vite": {
+       "import": {
+         "types": "./dist/esm/plugin/vite.d.ts",
+@@ -106,6 +118,14 @@
+     },
+     "./package.json": "./package.json"
+   },
++  "imports": {
++    "#tanstack-start-entry": {
++      "default": "./dist/esm/empty-start-entry.js"
++    },
++    "#tanstack-start-plugin-adapters": {
++      "default": "./dist/esm/empty-plugin-adapters.js"
++    }
++  },
+   "sideEffects": false,
+   "files": [
+     "dist",
+@@ -124,6 +144,7 @@
+     "@tanstack/start-client-core": "workspace:*",
+     "@tanstack/start-plugin-core": "workspace:*",
+     "@tanstack/start-server-core": "workspace:*",
++    "@tanstack/start-storage-context": "workspace:*",
+     "pathe": "^2.0.3"
+   },
+   "devDependencies": {
+diff --git a/packages/solid-start/src/client-rpc.ts b/packages/solid-start/src/client-rpc.ts
+index ca68ae47e99..0be23724de9 100644
+--- a/packages/solid-start/src/client-rpc.ts
++++ b/packages/solid-start/src/client-rpc.ts
+@@ -1 +1,35 @@
+-export * from '@tanstack/start-client-core/client-rpc'
++import {
++  GET,
++  configureServerFunctionsClient,
++  createServerReference,
++} from '@solidjs/web/server-functions/client'
++import { TSS_SERVER_FUNCTION } from '@tanstack/start-client-core'
++import { encodeSolidStartPayload } from './solid-rpc-payload'
++import { getSolidStartServerFunctionCodec } from './solid-rpc-codec'
++import { subscribeSolidStartFlightData } from './solid-rpc-flight-client'
++import type { ClientFnMeta } from '@tanstack/start-client-core'
++
++export function createClientRpc(functionId: string) {
++  subscribeSolidStartFlightData()
++  const endpoint = process.env.TSS_SERVER_FN_BASE
++  const url = endpoint + functionId
++  const serverFnMeta: ClientFnMeta = { id: functionId }
++  configureServerFunctionsClient({
++    endpoint,
++    codec: getSolidStartServerFunctionCodec(),
++  })
++  const solidReference = createServerReference(functionId, undefined, endpoint)
++  const solidGetReference = GET(solidReference)
++
++  const clientFn = (...args: Array<any>) => {
++    const reference =
++      args[0]?.method === 'GET' ? solidGetReference : solidReference
++    return reference(...encodeSolidStartPayload(args))
++  }
++
++  return Object.assign(clientFn, {
++    url,
++    serverFnMeta,
++    [TSS_SERVER_FUNCTION]: true,
++  })
++}
+diff --git a/packages/solid-start/src/createSolidStartHandler.ts b/packages/solid-start/src/createSolidStartHandler.ts
+new file mode 100644
+index 00000000000..c5b2013804e
+--- /dev/null
++++ b/packages/solid-start/src/createSolidStartHandler.ts
+@@ -0,0 +1,200 @@
++import { provideRequestEvent } from '@solidjs/web/storage'
++import {
++  createNullProtoObject,
++  flattenMiddlewares,
++  safeObjectMerge,
++} from '@tanstack/start-client-core'
++import { createStartHandler } from '@tanstack/solid-start-server'
++import { createMemoryHistory } from '@tanstack/solid-router'
++import {
++  getResponse,
++  requestHandler,
++} from '@tanstack/start-server-core/request-response'
++import { handleSolidServerFunctionRequest } from './server-functions-handler'
++import type { RequestHandler } from '@tanstack/solid-start-server'
++import type { AnyRouter, Register } from '@tanstack/solid-router'
++import type {
++  AnyRequestMiddleware,
++  AnyStartInstanceOptions,
++} from '@tanstack/start-client-core'
++
++type RequestMiddlewareResult = {
++  request: Request
++  pathname: string
++  context: Record<string, unknown>
++  response: Response
++}
++
++export function createSolidStartHandler<TRegister = Register>(
++  cbOrOptions: Parameters<typeof createStartHandler>[0],
++): RequestHandler<TRegister> {
++  const startHandler = createStartHandler<TRegister>(cbOrOptions)
++  const solidServerFnHandler = requestHandler(
++    async (request, requestOptions) => {
++      const getRouter = createRequestRouterGetter(request)
++      const startOptions = await getRequestStartOptions(getRouter)
++      const requestMiddlewares = flattenMiddlewares(
++        (startOptions.requestMiddleware ?? []) as Array<AnyRequestMiddleware>,
++      )
++      const response = await executeRequestMiddleware(
++        request,
++        requestMiddlewares,
++        requestOptions?.context,
++        async (context) => {
++          return await handleSolidServerFunctionRequest(request, {
++            startContext: {
++              contextAfterGlobalMiddlewares: context,
++              executedRequestMiddlewares: new Set(requestMiddlewares),
++              getRouter,
++              request,
++              startOptions,
++            },
++          })
++        },
++      )
++      const startResponse = getResponse()
++      const status = startResponse.status || 200
++      const statusText = startResponse.statusText || ''
++
++      if (
++        response.status !== 200 ||
++        (response.status === status && response.statusText === statusText)
++      ) {
++        return response
++      }
++
++      return new Response(response.body, {
++        headers: response.headers,
++        status,
++        statusText,
++      })
++    },
++  )
++
++  return (async (request: Request, requestOptions?: unknown) => {
++    return await provideRequestEvent({ request, locals: {} }, async () => {
++      const serverFnBase = process.env.TSS_SERVER_FN_BASE
++      const url = new URL(request.url)
++
++      if (serverFnBase && url.pathname.startsWith(serverFnBase)) {
++        return await solidServerFnHandler(request, requestOptions as never)
++      }
++
++      return await (startHandler as any)(request, requestOptions)
++    })
++  }) as RequestHandler<TRegister>
++}
++
++async function executeRequestMiddleware(
++  request: Request,
++  middlewares: Array<AnyRequestMiddleware>,
++  initialContext: object | undefined,
++  handler: (context: Record<string, unknown>) => Promise<Response>,
++) {
++  const pathname = new URL(request.url).pathname
++
++  const dispatch = async (
++    index: number,
++    context: Record<string, unknown>,
++  ): Promise<RequestMiddlewareResult> => {
++    request.signal.throwIfAborted()
++    const middleware = middlewares[index]?.options.server
++
++    if (!middleware) {
++      if (index < middlewares.length) {
++        return await dispatch(index + 1, context)
++      }
++
++      return {
++        request,
++        pathname,
++        context,
++        response: await handler(context),
++      }
++    }
++
++    let nextCalled = false
++    const next = async (options?: { context?: Record<string, unknown> }) => {
++      if (nextCalled) {
++        throw new Error('Request middleware called next() more than once')
++      }
++      nextCalled = true
++      return await dispatch(
++        index + 1,
++        safeObjectMerge(context, options?.context),
++      )
++    }
++
++    try {
++      const result = await middleware({
++        request,
++        pathname,
++        handlerType: 'serverFn',
++        context,
++        next,
++      } as never)
++
++      if (result instanceof Response) {
++        return { request, pathname, context, response: result }
++      }
++
++      return result as RequestMiddlewareResult
++    } catch (error) {
++      if (error instanceof Response) {
++        return { request, pathname, context, response: error }
++      }
++      throw error
++    }
++  }
++
++  const context = createNullProtoObject(initialContext) as Record<
++    string,
++    unknown
++  >
++  return (await dispatch(0, context)).response
++}
++
++async function getRequestStartOptions(
++  getRouter: () => Promise<AnyRouter>,
++): Promise<AnyStartInstanceOptions> {
++  const [startEntry, pluginAdapters, router] = await Promise.all([
++    import('#tanstack-start-entry'),
++    import('#tanstack-start-plugin-adapters'),
++    getRouter(),
++  ])
++  const startOptions =
++    (await startEntry.startInstance?.getOptions()) ??
++    ({} as AnyStartInstanceOptions)
++
++  return {
++    ...startOptions,
++    serializationAdapters: [
++      ...(startOptions.serializationAdapters ?? []),
++      ...(pluginAdapters.hasPluginAdapters
++        ? pluginAdapters.pluginSerializationAdapters
++        : []),
++      ...(router.options.serializationAdapters ?? []),
++    ],
++  }
++}
++
++function createRequestRouterGetter(request: Request) {
++  let routerPromise: Promise<AnyRouter> | undefined
++
++  return async () => {
++    routerPromise ??= import('#tanstack-router-entry').then(
++      async ({ getRouter }) => {
++        const router = await getRouter()
++        const url = new URL(request.url)
++        router.update({
++          history: createMemoryHistory({
++            initialEntries: [url.pathname + url.search + url.hash],
++          }),
++          origin: url.origin,
++        })
++        return router
++      },
++    )
++    return await routerPromise
++  }
++}
+diff --git a/packages/solid-start/src/empty-plugin-adapters.ts b/packages/solid-start/src/empty-plugin-adapters.ts
+new file mode 100644
+index 00000000000..c9046cccf8a
+--- /dev/null
++++ b/packages/solid-start/src/empty-plugin-adapters.ts
+@@ -0,0 +1,4 @@
++import type { AnySerializationAdapter } from '@tanstack/solid-router'
++
++export const pluginSerializationAdapters: Array<AnySerializationAdapter> = []
++export const hasPluginAdapters = false
+diff --git a/packages/solid-start/src/empty-start-entry.ts b/packages/solid-start/src/empty-start-entry.ts
+new file mode 100644
+index 00000000000..a3ca295ab83
+--- /dev/null
++++ b/packages/solid-start/src/empty-start-entry.ts
+@@ -0,0 +1,3 @@
++import type { AnyStartInstance } from '@tanstack/start-client-core'
++
++export const startInstance: AnyStartInstance | undefined = undefined
+diff --git a/packages/solid-start/src/server-functions-handler.ts b/packages/solid-start/src/server-functions-handler.ts
+new file mode 100644
+index 00000000000..f321d3fb76a
+--- /dev/null
++++ b/packages/solid-start/src/server-functions-handler.ts
+@@ -0,0 +1,236 @@
++import {
++  FUNCTION_HEADER,
++  configureServerFunctionsServer,
++  createNoJSHandler,
++  handleServerFunctionRequest,
++} from '@solidjs/web/server-functions/server'
++import { redirect } from '@tanstack/solid-router'
++import { provideRequestEvent } from '@solidjs/web/storage'
++import {
++  getStartContext,
++  runWithStartContext,
++} from '@tanstack/start-storage-context'
++import { getSolidStartServerFunctionCodec } from './solid-rpc-codec'
++import { collectSolidStartFlightData } from './solid-rpc-flight-server'
++import type { HandleServerFunctionOptions } from '@solidjs/web/server-functions/server'
++import type { StartStorageContext } from '@tanstack/start-storage-context'
++import { getServerFnById } from '#tanstack-start-server-fn-resolver'
++
++configureServerFunctionsServer({
++  provideEvent: provideRequestEvent,
++})
++
++const solidNoJSHandler = createNoJSHandler()
++
++export interface HandleSolidServerFunctionRequestOptions extends HandleServerFunctionOptions {
++  startContext?: Partial<StartStorageContext>
++}
++
++export async function handleSolidServerFunctionRequest(
++  request: Request,
++  options: HandleSolidServerFunctionRequestOptions = {},
++) {
++  const serverFnId = getSolidServerFunctionId(request)
++
++  if (!serverFnId) {
++    throw new Error('Unable to resolve Solid server function id from request')
++  }
++
++  await getServerFnById(serverFnId, { origin: 'client' })
++
++  const requestWithId = withSolidServerFunctionId(request, serverFnId)
++  const { startContext, ...solidOptions } = options
++  const transformResult = solidOptions.transformResult
++  const handleNoJS = solidOptions.handleNoJS
++  const collectFlightData = solidOptions.collectFlightData
++  const existingStartContext = getStartContext({ throwIfNotFound: false })
++  const handlerOptions: HandleServerFunctionOptions = {
++    ...solidOptions,
++    collectFlightData: collectFlightData ?? collectSolidStartFlightData,
++    transformResult: async (event, result, context) => {
++      const transformed = transformResult
++        ? await transformResult(event, result, context)
++        : result
++      return adaptTanStackResult(transformed)
++    },
++    handleNoJS: async (result, currentRequest, args, thrown) => {
++      if (handleNoJS) {
++        return await handleNoJS(result, currentRequest, args, thrown)
++      }
++      return await handleSolidStartNoJS(result, currentRequest, args, thrown)
++    },
++  }
++  const handleRequest = () =>
++    handleServerFunctionRequest(requestWithId, {
++      codec: getSolidStartServerFunctionCodec(),
++      ...handlerOptions,
++    })
++
++  if (existingStartContext) {
++    return await handleRequest()
++  }
++
++  return await runWithStartContext(
++    {
++      getRouter: unavailableRouter,
++      request,
++      startOptions: {},
++      contextAfterGlobalMiddlewares: {},
++      executedRequestMiddlewares: new Set(),
++      handlerType: 'serverFn',
++      ...startContext,
++    },
++    handleRequest,
++  )
++}
++
++function getSolidServerFunctionId(request: Request) {
++  const headerId = request.headers.get(FUNCTION_HEADER)
++  if (headerId) {
++    return headerId
++  }
++
++  const url = new URL(request.url)
++  const queryId = url.searchParams.get('id')
++  if (queryId) {
++    return queryId
++  }
++
++  const serverFnBase = process.env.TSS_SERVER_FN_BASE
++  if (serverFnBase && url.pathname.startsWith(serverFnBase)) {
++    return url.pathname.slice(serverFnBase.length).split('/')[0]
++  }
++
++  return undefined
++}
++
++function withSolidServerFunctionId(request: Request, serverFnId: string) {
++  if (request.headers.has(FUNCTION_HEADER)) {
++    return request
++  }
++
++  try {
++    request.headers.set(FUNCTION_HEADER, serverFnId)
++    return request
++  } catch {
++    const clonedRequest = request.clone()
++    clonedRequest.headers.set(FUNCTION_HEADER, serverFnId)
++    return clonedRequest
++  }
++}
++
++function serializeTanStackRedirect(result: unknown) {
++  if (!isObject(result) || !isTanStackRedirect(result.error)) {
++    return result
++  }
++
++  const redirectResponse = result.error
++  return {
++    ...result,
++    error: {
++      ...redirectResponse.options,
++      headers: Object.fromEntries(redirectResponse.headers),
++      isSerializedRedirect: true,
++    },
++  }
++}
++
++function adaptTanStackResult(result: unknown) {
++  const serialized = serializeTanStackRedirect(result)
++  if (!isTanStackResultEnvelope(serialized)) {
++    return serialized
++  }
++
++  return Object.fromEntries(
++    Object.entries(serialized).filter(([, value]) => value !== undefined),
++  )
++}
++
++async function handleSolidStartNoJS(
++  result: unknown,
++  request: Request,
++  args: Array<unknown>,
++  thrown?: boolean,
++) {
++  if (isObject(result) && isSerializedRedirect(result.error)) {
++    const startContext = getStartContext({ throwIfNotFound: false })
++    if (startContext) {
++      const router = await startContext.getRouter()
++      return router.resolveRedirect(redirect(result.error as never))
++    }
++  }
++
++  if (isObject(result)) {
++    const unwrapped = result.result ?? result.error
++    if (isResponseLike(unwrapped)) {
++      return normalizeResponse(unwrapped)
++    }
++    if (typeof unwrapped === 'string') {
++      return new Response(unwrapped)
++    }
++    if (unwrapped !== undefined) {
++      return Response.json(unwrapped)
++    }
++  }
++
++  return solidNoJSHandler(result, request, args, thrown)
++}
++
++function isTanStackRedirect(
++  value: unknown,
++): value is Response & { options: Record<string, unknown> } {
++  return isResponseLike(value) && isObject(value.options)
++}
++
++function isTanStackResultEnvelope(
++  value: unknown,
++): value is Record<string, unknown> {
++  return (
++    isObject(value) &&
++    ('result' in value || 'error' in value || 'context' in value)
++  )
++}
++
++interface ResponseLike {
++  body: ReadableStream<Uint8Array> | null
++  headers: Headers
++  options?: unknown
++  status: number
++  statusText: string
++}
++
++function isResponseLike(value: unknown): value is ResponseLike {
++  return (
++    isObject(value) &&
++    typeof value.status === 'number' &&
++    isObject(value.headers) &&
++    typeof value.headers.forEach === 'function' &&
++    ('body' in value || typeof value.text === 'function')
++  )
++}
++
++function normalizeResponse(response: ResponseLike) {
++  if (response instanceof Response) {
++    return response
++  }
++
++  return new Response(response.body, {
++    headers: response.headers,
++    status: response.status,
++    statusText: response.statusText,
++  })
++}
++
++function isSerializedRedirect(value: unknown) {
++  return isObject(value) && value.isSerializedRedirect === true
++}
++
++function isObject(value: unknown): value is Record<string, any> {
++  return !!value && typeof value === 'object'
++}
++
++function unavailableRouter(): never {
++  throw new Error(
++    'Router context is not available in handleSolidServerFunctionRequest. Use it inside createStartHandler or pass startContext.getRouter.',
++  )
++}
+diff --git a/packages/solid-start/src/server-rpc.ts b/packages/solid-start/src/server-rpc.ts
+index 76cee4dbc0d..7e4af1b76c7 100644
+--- a/packages/solid-start/src/server-rpc.ts
++++ b/packages/solid-start/src/server-rpc.ts
+@@ -1 +1,54 @@
+-export { createServerRpc } from '@tanstack/start-server-core/createServerRpc'
++import {
++  GET,
++  createServerReference,
++  registerServerReference,
++} from '@solidjs/web/server-functions/server'
++import { TSS_SERVER_FUNCTION } from '@tanstack/start-client-core'
++import { decodeSolidStartPayload } from './solid-rpc-payload'
++import type { ServerFnMeta } from '@tanstack/start-client-core'
++import type { ServerFunctionReference } from '@solidjs/web/server-functions/server'
++
++export const SOLID_SERVER_REFERENCE = Symbol.for(
++  'tanstack.solid-start.server-reference',
++)
++
++export type SolidRegisteredServerFn = {
++  [SOLID_SERVER_REFERENCE]?: ServerFunctionReference
++}
++
++export const createServerRpc = (
++  serverFnMeta: ServerFnMeta,
++  splitImportFn: (...args: Array<any>) => any,
++) => {
++  const url = process.env.TSS_SERVER_FN_BASE + serverFnMeta.id
++  const solidServerFn = (...args: Array<any>) => {
++    return splitImportFn(decodeSolidStartPayload(args))
++  }
++  const reference = registerServerReference(
++    serverFnMeta.id,
++    solidServerFn,
++    serverFnMeta.name,
++  )
++  const solidReference = createServerReference(reference)
++  let method = (splitImportFn as typeof splitImportFn & { method?: string })
++    .method
++
++  Object.defineProperty(splitImportFn, 'method', {
++    configurable: true,
++    enumerable: true,
++    get: () => method,
++    set: (nextMethod) => {
++      method = nextMethod
++      if (nextMethod === 'GET') {
++        GET(solidReference)
++      }
++    },
++  })
++
++  return Object.assign(splitImportFn, {
++    url,
++    serverFnMeta,
++    [SOLID_SERVER_REFERENCE]: reference,
++    [TSS_SERVER_FUNCTION]: true,
++  })
++}
+diff --git a/packages/solid-start/src/server.tsx b/packages/solid-start/src/server.tsx
+index 5e6da97d48d..07a4a60980b 100644
+--- a/packages/solid-start/src/server.tsx
++++ b/packages/solid-start/src/server.tsx
+@@ -1 +1,10 @@
++// eslint-disable-next-line @typescript-eslint/triple-slash-reference
++/// <reference path="./tanstack-start.d.ts" />
++
++export {
++  createSolidStartHandler,
++  createSolidStartHandler as createStartHandler,
++} from './createSolidStartHandler'
++export { handleSolidServerFunctionRequest } from './server-functions-handler'
++export type { HandleSolidServerFunctionRequestOptions } from './server-functions-handler'
+ export * from '@tanstack/solid-start-server'
+diff --git a/packages/solid-start/src/solid-rpc-codec.ts b/packages/solid-start/src/solid-rpc-codec.ts
+new file mode 100644
+index 00000000000..b47f0c67a77
+--- /dev/null
++++ b/packages/solid-start/src/solid-rpc-codec.ts
+@@ -0,0 +1,18 @@
++import { getDefaultSerovalPlugins } from '@tanstack/start-client-core'
++import type { HandleServerFunctionOptions } from '@solidjs/web/server-functions/server'
++
++type SolidServerFunctionCodec = NonNullable<
++  HandleServerFunctionOptions['codec']
++>
++
++const READABLE_STREAM_PLUGIN_TAG = 'seroval/plugins/web/ReadableStream'
++
++export function getSolidStartServerFunctionCodec(): SolidServerFunctionCodec {
++  return {
++    // Solid appends its web plugins, so including TanStack's copy of the
++    // ReadableStream plugin would register the same Seroval tag twice.
++    plugins: getDefaultSerovalPlugins().filter(
++      (plugin) => plugin.tag !== READABLE_STREAM_PLUGIN_TAG,
++    ) as unknown as SolidServerFunctionCodec['plugins'],
++  }
++}
+diff --git a/packages/solid-start/src/solid-rpc-flight-client.ts b/packages/solid-start/src/solid-rpc-flight-client.ts
+new file mode 100644
+index 00000000000..c96a983c2c8
+--- /dev/null
++++ b/packages/solid-start/src/solid-rpc-flight-client.ts
+@@ -0,0 +1,147 @@
++import { subscribeFlightData } from '@solidjs/web/server-functions/client'
++import type { AnyRouteMatch, AnyRouter } from '@tanstack/solid-router'
++import { getRouterInstance } from '@tanstack/start-client-core'
++import type {
++  SolidStartFlightData,
++  SolidStartFlightMatch,
++} from './solid-rpc-flight'
++
++let subscribed = false
++
++export function subscribeSolidStartFlightData() {
++  if (subscribed) {
++    return
++  }
++  subscribed = true
++
++  subscribeFlightData<SolidStartFlightData>(async (data) => {
++    if (!isSolidStartFlightData(data)) {
++      return
++    }
++
++    const router = await getRouterInstance()
++    if ('dehydratedData' in data) {
++      await router.options.hydrate?.(data.dehydratedData as never)
++    }
++
++    const currentLocation = isCurrentLocation(router, data.href)
++    const matches = currentLocation
++      ? router.stores.matches.get()
++      : router.matchRoutes(router.buildLocation({ href: data.href } as never))
++    if (matches.length !== data.matches.length) {
++      return
++    }
++
++    const flightMatches = new Map(
++      data.matches.map((match) => [match.id, match]),
++    )
++    const hydratedMatches: Array<AnyRouteMatch> = []
++    for (const match of matches) {
++      const flightMatch = flightMatches.get(match.id)
++      if (!flightMatch) {
++        return
++      }
++      hydratedMatches.push(applyFlightMatch(match, flightMatch))
++    }
++
++    if (currentLocation) {
++      publishCurrentMatches(router, hydratedMatches)
++    } else {
++      seedRedirectMatches(router, hydratedMatches)
++    }
++  })
++}
++
++function applyFlightMatch(
++  match: AnyRouteMatch,
++  flightMatch: SolidStartFlightMatch,
++): AnyRouteMatch {
++  const hasRouteState =
++    flightMatch.loaderData !== undefined ||
++    flightMatch.beforeLoadContext !== undefined ||
++    'error' in flightMatch ||
++    flightMatch.notFound === true ||
++    match.error !== undefined ||
++    match._notFound === true
++
++  if (!hasRouteState) {
++    return match
++  }
++
++  const nextMatch = {
++    ...match,
++    error: flightMatch.error,
++    invalid: false,
++    isFetching: false,
++    preload: false,
++    status: flightMatch.status,
++    updatedAt: flightMatch.updatedAt,
++    _flight: undefined,
++    _notFound: flightMatch.notFound,
++  } as AnyRouteMatch
++
++  if ('loaderData' in flightMatch) {
++    nextMatch.loaderData = flightMatch.loaderData
++  }
++  if ('beforeLoadContext' in flightMatch) {
++    ;(
++      nextMatch as AnyRouteMatch & { __beforeLoadContext?: unknown }
++    ).__beforeLoadContext = flightMatch.beforeLoadContext
++    nextMatch.context = {
++      ...nextMatch.context,
++      ...(flightMatch.beforeLoadContext as object | undefined),
++    }
++  }
++  if ('ssr' in flightMatch) {
++    nextMatch.ssr = flightMatch.ssr
++  }
++
++  return nextMatch
++}
++
++function publishCurrentMatches(
++  router: AnyRouter,
++  matches: Array<AnyRouteMatch>,
++) {
++  for (const match of matches) {
++    router._cache.delete(match.id)
++  }
++  router._committed = matches
++  router.batch(() => {
++    router.stores.setMatches(matches)
++    router.stores.status.set('idle')
++    router.stores.resolvedLocation.set(router.stores.location.get())
++  })
++}
++
++function seedRedirectMatches(router: AnyRouter, matches: Array<AnyRouteMatch>) {
++  for (const match of matches) {
++    router._cache.set(match.id, {
++      ...match,
++      context: {},
++      preload: true,
++    })
++  }
++}
++
++function isCurrentLocation(router: AnyRouter, href: string) {
++  const current = new URL(router.latestLocation.href, window.location.href)
++  const target = new URL(href, current)
++  return (
++    current.pathname === target.pathname &&
++    current.search === target.search &&
++    current.hash === target.hash
++  )
++}
++
++function isSolidStartFlightData(value: unknown): value is SolidStartFlightData {
++  return (
++    isObject(value) &&
++    typeof value.href === 'string' &&
++    Array.isArray(value.matches)
++  )
++}
++
++function isObject(value: unknown): value is Record<string, unknown> {
++  return !!value && typeof value === 'object'
++}
+diff --git a/packages/solid-start/src/solid-rpc-flight-server.ts b/packages/solid-start/src/solid-rpc-flight-server.ts
+new file mode 100644
+index 00000000000..e15f9e2403b
+--- /dev/null
++++ b/packages/solid-start/src/solid-rpc-flight-server.ts
+@@ -0,0 +1,121 @@
++import { provideRequestEvent } from '@solidjs/web/storage'
++import { createMemoryHistory } from '@tanstack/solid-router'
++import { attachRouterServerSsrUtils } from '@tanstack/solid-router/ssr/server'
++import {
++  getStartContext,
++  runWithStartContext,
++} from '@tanstack/start-storage-context'
++import { createSolidStartFlightMatch } from './solid-rpc-flight'
++import type {
++  CollectFlightDataHook,
++  ServerFunctionOutcome,
++} from '@solidjs/web/server-functions/server'
++import type { ServerFunctionEvent } from '@solidjs/web/server-functions/server'
++
++export const collectSolidStartFlightData: CollectFlightDataHook = async (
++  event,
++  outcome,
++) => {
++  const href = getTargetHref(outcome)
++  if (!href) {
++    return undefined
++  }
++
++  const startContext = getStartContext({ throwIfNotFound: false })
++  if (!startContext) {
++    return undefined
++  }
++
++  const targetUrl = new URL(href)
++  const request = new Request(targetUrl, {
++    headers: outcome.foldedHeaders,
++    signal: outcome.request.signal,
++  })
++  const flightEvent: ServerFunctionEvent = {
++    ...event,
++    request,
++  }
++  const router = await startContext.getRouter()
++  router.update({
++    history: createMemoryHistory({
++      initialEntries: [targetUrl.pathname + targetUrl.search + targetUrl.hash],
++    }),
++    origin: targetUrl.origin,
++  })
++
++  return await provideRequestEvent(flightEvent, async () => {
++    return await runWithStartContext(
++      {
++        ...startContext,
++        handlerType: 'router',
++        request,
++      },
++      async () => {
++        let attachedServerSsr = false
++        try {
++          if (router.options.dehydrate && !router.serverSsr) {
++            attachRouterServerSsrUtils({ router, manifest: undefined })
++            attachedServerSsr = true
++          }
++
++          await router.load({ _signal: outcome.request.signal })
++          const dehydratedData = await router.options.dehydrate?.()
++          router.serverSsr?.setRenderFinished()
++
++          return {
++            ...(dehydratedData === undefined ? {} : { dehydratedData }),
++            href: targetUrl.href,
++            matches: router.stores.matches
++              .get()
++              .map(createSolidStartFlightMatch),
++          }
++        } catch (error) {
++          console.error('Unable to collect TanStack Start flight data', error)
++          return undefined
++        } finally {
++          if (attachedServerSsr) {
++            router.serverSsr?.cleanup()
++          }
++        }
++      },
++    )
++  })
++}
++
++function getTargetHref(outcome: ServerFunctionOutcome) {
++  const redirectHref = getTanStackRedirectHref(outcome.value)
++  const target = redirectHref
++    ? new URL(
++        redirectHref,
++        outcome.request.headers.get('referer') ?? outcome.request.url,
++      )
++    : outcome.targetUrl
++      ? new URL(outcome.targetUrl)
++      : undefined
++
++  if (!target || target.origin !== new URL(outcome.request.url).origin) {
++    return undefined
++  }
++  return target.href
++}
++
++function getTanStackRedirectHref(value: unknown) {
++  if (!isObject(value) || !isObject(value.error)) {
++    return undefined
++  }
++  const error = value.error
++  if (error.isSerializedRedirect !== true) {
++    return undefined
++  }
++  if (typeof error.href === 'string') {
++    return error.href
++  }
++  if (isObject(error.headers) && typeof error.headers.location === 'string') {
++    return error.headers.location
++  }
++  return typeof error.to === 'string' ? error.to : undefined
++}
++
++function isObject(value: unknown): value is Record<string, any> {
++  return !!value && typeof value === 'object'
++}
+diff --git a/packages/solid-start/src/solid-rpc-flight.ts b/packages/solid-start/src/solid-rpc-flight.ts
+new file mode 100644
+index 00000000000..9a45a58aa49
+--- /dev/null
++++ b/packages/solid-start/src/solid-rpc-flight.ts
+@@ -0,0 +1,46 @@
++import type { AnyRouteMatch } from '@tanstack/solid-router'
++
++export interface SolidStartFlightMatch {
++  id: string
++  beforeLoadContext?: unknown
++  error?: unknown
++  loaderData?: unknown
++  notFound?: true
++  ssr?: AnyRouteMatch['ssr']
++  status: AnyRouteMatch['status']
++  updatedAt: number
++}
++
++export interface SolidStartFlightData {
++  dehydratedData?: unknown
++  href: string
++  matches: Array<SolidStartFlightMatch>
++}
++
++export function createSolidStartFlightMatch(
++  match: AnyRouteMatch,
++): SolidStartFlightMatch {
++  const flightMatch: SolidStartFlightMatch = {
++    id: match.id,
++    status: match.status,
++    updatedAt: match.updatedAt,
++  }
++
++  if ('__beforeLoadContext' in match) {
++    flightMatch.beforeLoadContext = match.__beforeLoadContext
++  }
++  if ('loaderData' in match) {
++    flightMatch.loaderData = match.loaderData
++  }
++  if (match.error !== undefined) {
++    flightMatch.error = match.error
++  }
++  if (match.ssr !== undefined) {
++    flightMatch.ssr = match.ssr
++  }
++  if (match._notFound) {
++    flightMatch.notFound = true
++  }
++
++  return flightMatch
++}
+diff --git a/packages/solid-start/src/solid-rpc-payload.ts b/packages/solid-start/src/solid-rpc-payload.ts
+new file mode 100644
+index 00000000000..824e7c40ade
+--- /dev/null
++++ b/packages/solid-start/src/solid-rpc-payload.ts
+@@ -0,0 +1,118 @@
++const START_PAYLOAD_DATA_ARG = 1
++
++export function encodeSolidStartPayload(args: Array<any>): Array<any> {
++  if (args.length !== 1 || !isObject(args[0])) {
++    return args
++  }
++
++  const payload = args[0]
++  const data = payload.data
++  const solidPayload = stripUndefined({
++    method: payload.method,
++    headers: normalizeHeaders(payload.headers as HeadersInit | undefined),
++    context: stripUndefined(payload.context),
++  })
++
++  if (isFormDataLike(data)) {
++    return [solidPayload, normalizeFormData(data)]
++  }
++
++  return [
++    stripUndefined({
++      ...solidPayload,
++      data,
++    }),
++  ]
++}
++
++export function decodeSolidStartPayload(args: Array<any>): any {
++  const payload = args[0]
++
++  if (
++    args.length > START_PAYLOAD_DATA_ARG &&
++    isObject(payload) &&
++    isFormDataLike(args[START_PAYLOAD_DATA_ARG])
++  ) {
++    return {
++      ...payload,
++      data: normalizeFormData(args[START_PAYLOAD_DATA_ARG]),
++    }
++  }
++
++  if (args.length === 1 && isFormDataLike(payload)) {
++    return { data: normalizeFormData(payload), method: 'POST' }
++  }
++
++  return payload
++}
++
++function normalizeHeaders(headers: HeadersInit | undefined) {
++  if (!headers) {
++    return undefined
++  }
++
++  const normalized: Record<string, string> = {}
++  new Headers(headers).forEach((value, key) => {
++    normalized[key] = value
++  })
++  return normalized
++}
++
++interface FormDataLike {
++  append: (name: string, value: unknown) => void
++  entries: () => IterableIterator<[string, FormDataEntryValue]>
++  get: (name: string) => FormDataEntryValue | null
++}
++
++function isFormDataLike(value: unknown): value is FormDataLike {
++  return (
++    typeof FormData !== 'undefined' &&
++    isObject(value) &&
++    typeof value.append === 'function' &&
++    typeof value.entries === 'function' &&
++    typeof value.get === 'function'
++  )
++}
++
++function normalizeFormData(value: FormDataLike) {
++  if (value instanceof FormData) {
++    return value
++  }
++
++  const normalized = new FormData()
++  for (const [name, entry] of value.entries()) {
++    normalized.append(name, entry)
++  }
++  return normalized
++}
++
++function stripUndefined<T>(value: T): T {
++  if (Array.isArray(value)) {
++    return value.map((item) => stripUndefined(item)) as T
++  }
++
++  if (!isPlainObject(value)) {
++    return value
++  }
++
++  const stripped: Record<string, unknown> = {}
++  for (const [key, nestedValue] of Object.entries(value)) {
++    if (nestedValue !== undefined) {
++      stripped[key] = stripUndefined(nestedValue)
++    }
++  }
++  return stripped as T
++}
++
++function isObject(value: unknown): value is Record<string, unknown> {
++  return !!value && typeof value === 'object'
++}
++
++function isPlainObject(value: unknown): value is Record<string, unknown> {
++  if (!isObject(value)) {
++    return false
++  }
++
++  const prototype = Object.getPrototypeOf(value)
++  return prototype === Object.prototype || prototype === null
++}
+diff --git a/packages/solid-start/src/ssr-rpc.ts b/packages/solid-start/src/ssr-rpc.ts
+index 568429b567c..483e7071616 100644
+--- a/packages/solid-start/src/ssr-rpc.ts
++++ b/packages/solid-start/src/ssr-rpc.ts
+@@ -1 +1,47 @@
+-export { createSsrRpc } from '@tanstack/start-server-core/createSsrRpc'
++import { getRequestEvent } from '@solidjs/web'
++import { createServerReference } from '@solidjs/web/server-functions/server'
++import { TSS_SERVER_FUNCTION } from '@tanstack/start-client-core'
++import { SOLID_SERVER_REFERENCE } from './server-rpc'
++import type { ClientFnMeta } from '@tanstack/start-client-core'
++import type { SolidRegisteredServerFn } from './server-rpc'
++import { getServerFnById } from '#tanstack-start-server-fn-resolver'
++
++export const createSsrRpc = (functionId: string) => {
++  const url = process.env.TSS_SERVER_FN_BASE + functionId
++  const serverFnMeta: ClientFnMeta = { id: functionId }
++
++  let serverFnPromise:
++    | Promise<
++        ((...args: Array<any>) => Promise<any>) | ((...args: Array<any>) => any)
++      >
++    | undefined
++
++  const getServerFn = async () => {
++    serverFnPromise ??= getServerFnById(functionId, {
++      origin: 'server',
++    }).then((serverFn) => {
++      const solidReference = (serverFn as SolidRegisteredServerFn)[
++        SOLID_SERVER_REFERENCE
++      ]
++
++      if (solidReference && getRequestEvent()) {
++        return createServerReference(solidReference)
++      }
++
++      return serverFn
++    })
++
++    return await serverFnPromise
++  }
++
++  const fn = async (...args: Array<any>): Promise<any> => {
++    const serverFn = await getServerFn()
++    return await serverFn(...args)
++  }
++
++  return Object.assign(fn, {
++    url,
++    serverFnMeta,
++    [TSS_SERVER_FUNCTION]: true,
++  })
++}
+diff --git a/packages/solid-start/src/tanstack-start.d.ts b/packages/solid-start/src/tanstack-start.d.ts
+new file mode 100644
+index 00000000000..9d99a50b838
+--- /dev/null
++++ b/packages/solid-start/src/tanstack-start.d.ts
+@@ -0,0 +1,31 @@
++declare module '#tanstack-start-server-fn-resolver' {
++  export type ServerFnLookupAccess = { origin: 'client' } | { origin: 'server' }
++
++  export type ServerFn = ((...args: Array<any>) => Promise<any>) & {
++    method?: 'GET' | 'POST'
++  }
++
++  export function getServerFnById(
++    id: string,
++    access: ServerFnLookupAccess,
++  ): Promise<ServerFn>
++}
++
++declare module '#tanstack-router-entry' {
++  import type { AnyRouter } from '@tanstack/solid-router'
++
++  export function getRouter(): AnyRouter | Promise<AnyRouter>
++}
++
++declare module '#tanstack-start-entry' {
++  import type { AnyStartInstance } from '@tanstack/start-client-core'
++
++  export const startInstance: AnyStartInstance | undefined
++}
++
++declare module '#tanstack-start-plugin-adapters' {
++  import type { AnySerializationAdapter } from '@tanstack/solid-router'
++
++  export const hasPluginAdapters: boolean
++  export const pluginSerializationAdapters: Array<AnySerializationAdapter>
++}
+diff --git a/packages/solid-start/tsconfig.server-entry.json b/packages/solid-start/tsconfig.server-entry.json
+index a73a0fc5ae6..f12a74a3e04 100644
+--- a/packages/solid-start/tsconfig.server-entry.json
++++ b/packages/solid-start/tsconfig.server-entry.json
+@@ -6,5 +6,5 @@
+       "@tanstack/solid-start/server": ["./src/server.tsx"]
+     }
+   },
+-  "include": ["src/default-entry"]
++  "include": ["src/default-entry", "src/tanstack-start.d.ts"]
+ }
+diff --git a/packages/solid-start/vite.config.ts b/packages/solid-start/vite.config.ts
+index 2c1a42d0e49..41aa84750ef 100644
+--- a/packages/solid-start/vite.config.ts
++++ b/packages/solid-start/vite.config.ts
+@@ -31,6 +31,10 @@ export default mergeConfig(
+       './src/client-rpc.ts',
+       './src/ssr-rpc.ts',
+       './src/server-rpc.ts',
++      './src/server-functions-handler.ts',
++      './src/createSolidStartHandler.ts',
++      './src/empty-plugin-adapters.ts',
++      './src/empty-start-entry.ts',
+       './src/server.tsx',
+       './src/plugin/rsbuild.ts',
+       './src/plugin/vite.ts',
+@@ -38,6 +42,10 @@ export default mergeConfig(
+       './src/client-only.ts',
+     ],
+     externalDeps: [
++      '#tanstack-router-entry',
++      '#tanstack-start-entry',
++      '#tanstack-start-plugin-adapters',
++      '#tanstack-start-server-fn-resolver',
+       '@tanstack/solid-start-client',
+       '@tanstack/solid-start-server',
+     ],
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 8e4e6156cc2..0ceeab79652 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -14405,6 +14405,9 @@ importers:
+       '@tanstack/start-server-core':
+         specifier: workspace:*
+         version: link:../start-server-core
++      '@tanstack/start-storage-context':
++        specifier: workspace:*
++        version: link:../start-storage-context
+       pathe:
+         specifier: ^2.0.3
+         version: 2.0.3

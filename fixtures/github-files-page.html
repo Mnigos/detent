@@ -1,0 +1,99 @@
+<!-- Trimmed snippet of https://github.com/Mnigos/tessera/pull/165/files (classic Files changed page,
+     fetched logged out on 2026-09-02). Diff tables removed. The .js-reviewed-toggle / .js-reviewed-checkbox
+     markup is not served logged out; it is reconstructed from github.githubassets.com/assets/diffs-*.js,
+     which queries `.js-reviewed-toggle`, `.js-reviewed-checkbox`, `.js-reviewed-file` and toggles
+     `data-file-user-viewed` on the `.js-details-container` and on `#file-tree-item-<anchor>`.
+     The third tree item has no rendered file section (progressive loading). -->
+<div id="partial-discussion-header">
+  <h1 class="gh-header-title">
+    <bdi class="js-issue-title markdown-title">feat(github-import): import a repository from GitHub</bdi>
+    <span class="f1-light color-fg-muted">#165</span>
+  </h1>
+</div>
+<div class="js-discussion">
+  <div class="timeline-comment">
+    <task-lists><div class="comment-body markdown-body"><p>Adds the import contract, the service that walks the tree and the source selector.</p></div></task-lists>
+  </div>
+</div>
+<div id="files_bucket">
+  <div id="diff-layout-component">
+    <file-tree>
+      <ul class="ActionList ActionList--tree">
+        <li id="file-tree-item-diff-f72ff48835cbca079104e27f76b0c2e31cced3c5ab43c8c244abc79b20a293ea"
+            class="ActionList-item ActionList-item--subItem js-tree-node" role="treeitem" data-tree-entry-type="file">
+          <span data-filterable-item-text hidden>apps/api/src/modules/github-import/application/github-import.service.spec.ts</span>
+          <a class="ActionList-content hx_ActionList-content" href="#diff-f72ff48835cbca079104e27f76b0c2e31cced3c5ab43c8c244abc79b20a293ea" data-turbo="false">
+            <span class="ActionList-item-label ActionList-item-label--truncate">github-import.service.spec.ts</span>
+          </a>
+        </li>
+        <li id="file-tree-item-diff-4432f2710fdacec9d3206b2a3a078be5e55dc38e1db80e519c9a78437a10551e"
+            class="ActionList-item ActionList-item--subItem js-tree-node" role="treeitem" data-tree-entry-type="file">
+          <span data-filterable-item-text hidden>apps/api/src/modules/github-import/application/github-import.service.ts</span>
+          <a class="ActionList-content hx_ActionList-content" href="#diff-4432f2710fdacec9d3206b2a3a078be5e55dc38e1db80e519c9a78437a10551e" data-turbo="false">
+            <span class="ActionList-item-label ActionList-item-label--truncate">github-import.service.ts</span>
+          </a>
+        </li>
+        <li id="file-tree-item-diff-256dd4fe6a834440cf206becbdfc6d30712a6672ee6ed582bd31bb16059b8e18"
+            class="ActionList-item ActionList-item--subItem js-tree-node" role="treeitem" data-tree-entry-type="file">
+          <span data-filterable-item-text hidden>packages/contracts/src/github-import.contract.ts</span>
+          <a class="ActionList-content hx_ActionList-content" href="#diff-256dd4fe6a834440cf206becbdfc6d30712a6672ee6ed582bd31bb16059b8e18" data-turbo="false">
+            <span class="ActionList-item-label ActionList-item-label--truncate">github-import.contract.ts</span>
+          </a>
+        </li>
+      </ul>
+    </file-tree>
+    <div id="files" class="diff-view js-diff-container">
+      <div class="js-diff-progressive-container">
+        <copilot-diff-entry data-file-path="apps/api/src/modules/github-import/application/github-import.service.spec.ts">
+          <div id="diff-f72ff48835cbca079104e27f76b0c2e31cced3c5ab43c8c244abc79b20a293ea"
+               data-details-container-group="file"
+               class="file js-file js-details-container js-targetable-element show-inline-notes Details Details--on open"
+               data-file-type=".ts" data-file-deleted="false"
+               data-tagsearch-path="apps/api/src/modules/github-import/application/github-import.service.spec.ts"
+               data-targets="diff-file-filter.diffEntries">
+            <div class="file-header d-flex js-file-header js-skip-tagsearch sticky-file-header"
+                 data-path="apps/api/src/modules/github-import/application/github-import.service.spec.ts"
+                 data-short-path="f72ff48"
+                 data-anchor="diff-f72ff48835cbca079104e27f76b0c2e31cced3c5ab43c8c244abc79b20a293ea"
+                 data-file-type=".ts" data-file-deleted="false">
+              <div class="file-actions">
+                <form class="js-replace-file-header-review">
+                  <label class="form-control d-flex js-reviewed-toggle color-fg-muted color-border-default">
+                    <input class="js-reviewed-checkbox" type="checkbox" name="viewed" value="true">
+                    Viewed
+                  </label>
+                </form>
+              </div>
+            </div>
+            <div class="js-file-content Details-content--hidden position-relative"></div>
+          </div>
+        </copilot-diff-entry>
+        <copilot-diff-entry data-file-path="apps/api/src/modules/github-import/application/github-import.service.ts">
+          <div id="diff-4432f2710fdacec9d3206b2a3a078be5e55dc38e1db80e519c9a78437a10551e"
+               data-details-container-group="file"
+               class="file js-file js-details-container js-targetable-element show-inline-notes Details Details--on open"
+               data-file-type=".ts" data-file-deleted="false"
+               data-file-user-viewed
+               data-tagsearch-path="apps/api/src/modules/github-import/application/github-import.service.ts"
+               data-targets="diff-file-filter.diffEntries">
+            <div class="file-header d-flex js-file-header js-skip-tagsearch sticky-file-header"
+                 data-path="apps/api/src/modules/github-import/application/github-import.service.ts"
+                 data-short-path="4432f27"
+                 data-anchor="diff-4432f2710fdacec9d3206b2a3a078be5e55dc38e1db80e519c9a78437a10551e"
+                 data-file-type=".ts" data-file-deleted="false">
+              <div class="file-actions">
+                <form class="js-replace-file-header-review">
+                  <label class="form-control d-flex js-reviewed-toggle color-bg-accent color-border-accent">
+                    <input class="js-reviewed-checkbox" type="checkbox" name="viewed" value="true" checked>
+                    Viewed
+                  </label>
+                </form>
+              </div>
+            </div>
+            <div class="js-file-content Details-content--hidden position-relative"></div>
+          </div>
+        </copilot-diff-entry>
+      </div>
+    </div>
+  </div>
+</div>

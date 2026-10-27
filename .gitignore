@@ -1,0 +1,9 @@
+node_modules
+.output
+.wxt
+dist
+.DS_Store
+.env
+.env*
+# Logged-in page captures from tooling/capture-dom.mjs carry session data.
+fixtures/github-changes-page.html

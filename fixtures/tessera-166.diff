@@ -1,0 +1,203 @@
+diff --git a/apps/api/src/modules/repositories/application/repositories.service.spec.ts b/apps/api/src/modules/repositories/application/repositories.service.spec.ts
+index 255c0cc7..1a94764c 100644
+--- a/apps/api/src/modules/repositories/application/repositories.service.spec.ts
++++ b/apps/api/src/modules/repositories/application/repositories.service.spec.ts
+@@ -147,6 +147,7 @@ describe(RepositoriesService.name, () => {
+ 						completeImportedGitHubRepository: vi.fn(),
+ 						upsertGitHubExternalSource: vi.fn(),
+ 						findGitHubMirrorEnablement: vi.fn(),
++						linkGitHubInstallationByOwner: vi.fn().mockResolvedValue(false),
+ 						enableGitHubMirror: vi.fn(),
+ 						cutoverGitHubMirror: vi.fn(),
+ 						findCollaboratorRole: vi.fn(),
+@@ -883,6 +884,39 @@ describe(RepositoriesService.name, () => {
+ 		expect(gitHubSyncQueue.enqueue).toHaveBeenCalledWith(syncRequest)
+ 	})
+ 
++	test('binds an installation made before the import and enables mirroring', async () => {
++		vi.spyOn(repositoriesRepository, 'find').mockResolvedValue({
++			...repository,
++			storagePath: '/var/lib/tessera/repositories/repo.git',
++			externalSource: createGitHubExternalSource({ mirrorMode: 'imported' }),
++		})
++		vi.spyOn(
++			repositoriesRepository,
++			'findGitHubMirrorEnablement'
++		).mockResolvedValue({ mirrorMode: 'imported' })
++		const linkSpy = vi
++			.spyOn(repositoriesRepository, 'linkGitHubInstallationByOwner')
++			.mockResolvedValue(true)
++		const syncRequest = {
++			repositoryId: repository.id,
++			authorityGeneration: 1,
++			requestedSyncVersion: 3,
++		}
++		vi.spyOn(repositoriesRepository, 'enableGitHubMirror').mockResolvedValue(
++			syncRequest
++		)
++		const gitHubSyncQueue = moduleRef.get(GitHubSyncQueue)
++
++		expect(
++			await repositoriesService.enableGitHubMirror(mockUserId, {
++				username: 'marta',
++				slug: repository.slug,
++			})
++		).toEqual({ status: 'enabled' })
++		expect(linkSpy).toHaveBeenCalledWith({ repositoryId: repository.id })
++		expect(gitHubSyncQueue.enqueue).toHaveBeenCalledWith(syncRequest)
++	})
++
+ 	test('returns the GitHub App installation URL when installation is required', async () => {
+ 		vi.spyOn(repositoriesRepository, 'find').mockResolvedValue({
+ 			...repository,
+diff --git a/apps/api/src/modules/repositories/application/repositories.service.ts b/apps/api/src/modules/repositories/application/repositories.service.ts
+index 1cdc2644..71d3ad6a 100644
+--- a/apps/api/src/modules/repositories/application/repositories.service.ts
++++ b/apps/api/src/modules/repositories/application/repositories.service.ts
+@@ -626,7 +626,13 @@ export class RepositoriesService {
+ 				repositoryId: repository.id,
+ 			})
+ 
+-		if (!enablement?.installationId) {
++		const isInstalled =
++			Boolean(enablement?.installationId) ||
++			(await this.repositoriesRepository.linkGitHubInstallationByOwner({
++				repositoryId: repository.id,
++			}))
++
++		if (!isInstalled) {
+ 			const installUrl = this.envService.get('GITHUB_APP_INSTALL_URL')
+ 			if (!installUrl)
+ 				throw new RepositoryGitHubMirrorSyncUnavailableError({
+diff --git a/apps/api/src/modules/repositories/infrastructure/repositories.repository.spec.ts b/apps/api/src/modules/repositories/infrastructure/repositories.repository.spec.ts
+index 361cdf2b..094ce010 100644
+--- a/apps/api/src/modules/repositories/infrastructure/repositories.repository.spec.ts
++++ b/apps/api/src/modules/repositories/infrastructure/repositories.repository.spec.ts
+@@ -740,6 +740,29 @@ describe(RepositoriesRepository.name, () => {
+ 		)
+ 	})
+ 
++	test('binds the owner installation to an unlinked GitHub source', async () => {
++		const repositoryId = '00000000-0000-4000-8000-000000000002' as RepositoryId
++		updateReturningMock.mockResolvedValueOnce([
++			{ installationId: '00000000-0000-4000-8000-000000000099' },
++		])
++
++		expect(
++			await repositoriesRepository.linkGitHubInstallationByOwner({
++				repositoryId,
++			})
++		).toBe(true)
++		expect(updateMock).toHaveBeenCalledWith(repositoryExternalSources)
++		expect(setMock).toHaveBeenCalledWith({ installationId: expect.anything() })
++
++		updateReturningMock.mockResolvedValueOnce([])
++
++		expect(
++			await repositoriesRepository.linkGitHubInstallationByOwner({
++				repositoryId,
++			})
++		).toBe(false)
++	})
++
+ 	test('cuts over a GitHub mirror to Tessera source', async () => {
+ 		const repositoryId = '00000000-0000-4000-8000-000000000002' as RepositoryId
+ 		const cutoverAt = new Date('2026-05-12T00:02:00Z')
+diff --git a/apps/api/src/modules/repositories/infrastructure/repositories.repository.ts b/apps/api/src/modules/repositories/infrastructure/repositories.repository.ts
+index 0993a49d..a9407e02 100644
+--- a/apps/api/src/modules/repositories/infrastructure/repositories.repository.ts
++++ b/apps/api/src/modules/repositories/infrastructure/repositories.repository.ts
+@@ -8,6 +8,7 @@ import {
+ 	type DrizzleTransaction,
+ 	eq,
+ 	exists,
++	gitHubInstallations,
+ 	inArray,
+ 	isNotNull,
+ 	isNull,
+@@ -453,6 +454,35 @@ export class RepositoriesRepository {
+ 			: undefined
+ 	}
+ 
++	// The installation webhook only binds sources that already exist, so a repository imported after the app was installed binds here.
++	async linkGitHubInstallationByOwner({
++		repositoryId,
++	}: RepositoryIdParams): Promise<boolean> {
++		const [source] = await this.db
++			.update(repositoryExternalSources)
++			.set({
++				installationId: sql`(
++					select ${gitHubInstallations.id}
++					from ${gitHubInstallations}
++					where lower(${gitHubInstallations.accountLogin}) = lower(${repositoryExternalSources.ownerLogin})
++						and ${gitHubInstallations.deletedAt} is null
++						and ${gitHubInstallations.suspendedAt} is null
++					order by ${gitHubInstallations.createdAt} desc
++					limit 1
++				)`,
++			})
++			.where(
++				and(
++					eq(repositoryExternalSources.repositoryId, repositoryId),
++					eq(repositoryExternalSources.provider, 'github'),
++					isNull(repositoryExternalSources.installationId)
++				)
++			)
++			.returning({ installationId: repositoryExternalSources.installationId })
++
++		return Boolean(source?.installationId)
++	}
++
+ 	async enableGitHubMirror({
+ 		repositoryId,
+ 	}: RepositoryIdParams): Promise<GitHubSyncRequest | undefined> {
+diff --git a/apps/api/tests/integration/repositories.integration.spec.ts b/apps/api/tests/integration/repositories.integration.spec.ts
+index ce1c5591..0faf5d3c 100644
+--- a/apps/api/tests/integration/repositories.integration.spec.ts
++++ b/apps/api/tests/integration/repositories.integration.spec.ts
+@@ -618,6 +618,45 @@ describe('Repositories integration', () => {
+ 		})
+ 	})
+ 
++	test('binds an installation made before the import when enabling the mirror', async () => {
++		const actor = await createIntegrationUser('admin')
++		const organizationId = await createIntegrationOrganization('tessera')
++		await seedOrganizationMember(organizationId, actor.id, 'admin')
++		await createRepository(
++			{
++				name: 'Imported',
++				slug: 'imported',
++				owner: { kind: 'organization', organizationId },
++			},
++			actor.headers
++		)
++		const importedRepository = await getRepositoryRow('imported')
++		const installationId = await createIntegrationGitHubInstallation()
++		await createIntegrationExternalSource({
++			repositoryId: importedRepository.id,
++			mirrorMode: 'imported',
++			ownerLogin: 'Tessera',
++			slug: 'imported',
++		})
++
++		const enableResponse = await enableGitHubMirror(
++			'tessera',
++			'imported',
++			actor.headers
++		)
++		const [source] = await db
++			.select({
++				installationId: repositoryExternalSources.installationId,
++				mirrorMode: repositoryExternalSources.mirrorMode,
++			})
++			.from(repositoryExternalSources)
++			.where(eq(repositoryExternalSources.repositoryId, importedRepository.id))
++
++		expect(enableResponse.status).toBe(200)
++		expect(await enableResponse.json()).toEqual({ status: 'enabled' })
++		expect(source).toEqual({ installationId, mirrorMode: 'github_to_tessera' })
++	})
++
+ 	test('lets an organization admin use repository details and GitHub settings', async () => {
+ 		const actor = await createIntegrationUser('admin')
+ 		const organizationId = await createIntegrationOrganization('tessera')

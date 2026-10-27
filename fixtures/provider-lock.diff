@@ -1,0 +1,18 @@
+diff --git a/src/renew.handler.ts b/src/renew.handler.ts
+--- a/src/renew.handler.ts
++++ b/src/renew.handler.ts
+@@ -10,1 +10,2 @@ export class RenewHandler {
+-    return this.entitlementRepository.update(input)
++    return this.entitlementRepository.withProviderReferenceLock({
++      operation: () => this.entitlementRepository.update(input) })
+diff --git a/src/entitlement.repository.ts b/src/entitlement.repository.ts
+--- a/src/entitlement.repository.ts
++++ b/src/entitlement.repository.ts
+@@ -205,0 +206,7 @@ export class EntitlementRepository {
++  withProviderReferenceLock<TResult>({
++    operation,
++  }: WithProviderReferenceLockParams<TResult>): Promise<TResult> {
++    return this.db.transaction(async tx => {
++      return operation({ db: tx })
++    })
++  }
