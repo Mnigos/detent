@@ -15,9 +15,27 @@ const BADGE_STYLE =
 	'flex-shrink:0;max-width:16rem;margin-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
 const FILE_PATH_SECTION = '[data-diff-header-wrapper] [class*="file-path-section"]'
 
+// New orders move the file the browser anchored the scroll to; scroll anchoring would follow it
+// far down the page. The pass runs with anchoring off and puts the old offset back.
+function holdViewport(list: HTMLElement, pass: () => void) {
+	const top = window.scrollY
+	list.style.overflowAnchor = 'none'
+	try {
+		pass()
+	} finally {
+		void list.offsetHeight
+		if (window.scrollY !== top) window.scrollTo({ top })
+		list.style.overflowAnchor = ''
+	}
+}
+
 export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 	const headers = new Map<string, HTMLElement>()
 	const badges = new Set<HTMLElement>()
+	// Per-entry lookups are cached: React rewrites entry styles while scrolling, and each rewrite
+	// used to cost three DOM queries per file on the whole list.
+	const regionIds = new WeakMap<HTMLElement, string | null>()
+	const badgeOf = new WeakMap<HTMLElement, HTMLElement>()
 	const entries = new Set<HTMLElement>()
 	let attached: HTMLElement | undefined
 	let current: PanelState | undefined
@@ -39,17 +57,22 @@ export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 	}
 
 	function placeBadge(entry: HTMLElement, text: string, hidden: boolean) {
-		const section = entry.querySelector<HTMLElement>(FILE_PATH_SECTION)
-		if (!section) return
+		let badge = badgeOf.get(entry)
+		if (badge && !entry.contains(badge)) badge = undefined
+		const section = badge ? undefined : entry.querySelector<HTMLElement>(FILE_PATH_SECTION)
+		if (!badge && !section) return
 
-		let badge = section.querySelector<HTMLElement>('[data-detent-layer]')
-		if (!badge) {
+		badge ??= section?.querySelector<HTMLElement>('[data-detent-layer]') ?? undefined
+		if (!badge && section) {
 			badge = document.createElement('span')
 			badge.dataset.detentLayer = ''
 			badge.className = 'fgColor-muted f6'
 			badge.style.cssText = BADGE_STYLE
 			section.prepend(badge)
 		}
+		if (!badge) return
+
+		badgeOf.set(entry, badge)
 		badges.add(badge)
 		if (badge.textContent !== text) badge.textContent = text
 		const title = text.startsWith(FOCUS_MARK)
@@ -61,6 +84,7 @@ export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 
 	// `focusedLayer` is the layer of the file under the sticky header; it stays bright while read.
 	function apply(list: HTMLElement, state: PanelState, focusedLayer?: number) {
+		const previous = current
 		current = state
 		focused = focusedLayer
 		if (attached !== list) {
@@ -70,6 +94,13 @@ export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 				if (current) apply(list, current, focused)
 			})
 		}
+		// The first pass and a regroup reorder the page; re-applies keep the same layers.
+		if (previous?.layers !== state.layers)
+			holdViewport(list, () => write(list, state, focusedLayer))
+		else write(list, state, focusedLayer)
+	}
+
+	function write(list: HTMLElement, state: PanelState, focusedLayer?: number) {
 		const positions = new Map<string, { order: number; layerIndex: number; badge: string }>()
 		// A finished layer dims like any other inactive one, even while it is still the current one.
 		const active = (layerIndex: number) =>
@@ -131,8 +162,14 @@ export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 			.querySelectorAll<HTMLElement>(':scope > :not([data-detent-section])')
 			.entries()) {
 			const isEntry = /diffEntry/.test(entry.className)
-			const region = isEntry ? entry.querySelector('[role="region"][id^="diff-"]') : null
-			const position = region ? positions.get(region.id) : undefined
+			let regionId = regionIds.get(entry)
+			if (regionId === undefined || regionId === null) {
+				regionId = isEntry
+					? (entry.querySelector('[role="region"][id^="diff-"]')?.id ?? null)
+					: null
+				regionIds.set(entry, regionId)
+			}
+			const position = regionId ? positions.get(regionId) : undefined
 			const order = state.isRaw
 				? ''
 				: isEntry

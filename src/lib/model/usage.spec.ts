@@ -22,6 +22,18 @@ beforeEach(() => {
 })
 
 describe('usage counter', () => {
+	it('counts grouping and ranking answers that land at the same time', async () => {
+		const delta = { promptTokens: 10, completionTokens: 2, cost: 0.001 }
+		await Promise.all([recordUsage(delta), recordUsage(delta), recordUsage(delta)])
+
+		expect(await readUsage()).toEqual({
+			requests: 3,
+			promptTokens: 30,
+			completionTokens: 6,
+			cost: 0.003,
+		})
+	})
+
 	it('starts empty, sums every recorded response and resets to nothing', async () => {
 		expect(await readUsage()).toEqual({
 			requests: 0,

@@ -7,6 +7,8 @@ export interface PanelFile {
 	deletions: number
 	/** The model marked this file as one to read carefully. */
 	isFocus?: boolean
+	/** Why the file ranks where it does in Priority Review. */
+	reason?: string
 }
 
 export interface PanelLayer {
@@ -15,6 +17,8 @@ export interface PanelLayer {
 	summary: string
 	files: PanelFile[]
 	isTrailing: boolean
+	/** The reviewer folds and unfolds this section with its chevron. */
+	isCollapsible?: boolean
 }
 
 export interface PanelPosition {
@@ -22,12 +26,21 @@ export interface PanelPosition {
 	fileIndex: number
 	isRaw: boolean
 	isCollapsed: boolean
+	/** Priority Review instead of layers; Files mode keeps it so `r` returns to it. */
+	isPriority: boolean
 }
 
+export type ViewMode = 'layers' | 'priority' | 'files'
+
 export interface PanelState extends PanelPosition {
+	/** The sections on screen: the grouping layers, or the priority sections in Priority Review. */
 	layers: PanelLayer[]
+	groupLayers: PanelLayer[]
+	priorityLayers: PanelLayer[]
 	viewed: ReadonlySet<string>
 	status: string
+	priorityStatus: string
+	collapsedSections: ReadonlySet<string>
 	/** A model request is in flight; the layers on screen are provisional. */
 	isAnalyzing: boolean
 	isTrailingExpanded: boolean
@@ -42,6 +55,9 @@ export type PanelAction =
 	| { type: 'select'; layerIndex: number; fileIndex: number }
 	| { type: 'analyzing'; status: string }
 	| { type: 'labels'; layers: PanelLayer[]; status: string }
+	| { type: 'priorities'; layers: PanelLayer[]; status: string }
+	| { type: 'set-mode'; mode: ViewMode }
+	| { type: 'toggle-section'; id: string }
 	| { type: 'toggle-raw' }
 	| { type: 'toggle-collapsed' }
 	| { type: 'toggle-trailing' }
@@ -61,6 +77,7 @@ const positionOf = (order: { layerIndex: number; fileIndex: number }[], state: P
 		(entry) => entry.layerIndex === state.layerIndex && entry.fileIndex === state.fileIndex,
 	)
 
+// Folded priority sections stay reachable: landing in one unfolds it (see `unfoldCurrent`).
 const reachableOrder = (state: PanelState) =>
 	readingOrder(state.layers).filter(
 		({ layerIndex }) =>
@@ -82,6 +99,13 @@ const clampPosition = (state: PanelState): PanelState => {
 
 export const currentFile = (state: PanelState): PanelFile | undefined =>
 	state.layers[state.layerIndex]?.files[state.fileIndex]
+
+export const viewModeOf = (state: PanelState): ViewMode =>
+	state.isRaw ? 'files' : state.isPriority ? 'priority' : 'layers'
+
+/** The footer line: a toast first, then the line of the mode on screen. */
+export const statusOf = (state: PanelState) =>
+	state.toast ?? (state.isPriority && !state.isRaw ? state.priorityStatus : state.status)
 
 export const isLayerComplete = (layer: PanelLayer | undefined, viewed: ReadonlySet<string>) =>
 	layer !== undefined &&
@@ -130,9 +154,10 @@ function applyViewed(state: PanelState, paths: ReadonlySet<string>, silent = fal
 			order.filter((entry) => entry.layerIndex > state.layerIndex).find(unviewed) ??
 			order.find(unviewed)
 		const following = moved && state.layers[moved.layerIndex]
+		const done = state.isPriority ? (layer?.name ?? '') : `Layer ${state.layerIndex + 1}`
 		const toast = following
-			? `Layer ${state.layerIndex + 1} done. Next: ${following.name}`
-			: `Layer ${state.layerIndex + 1} done. Every layer is reviewed.`
+			? `${done} done. Next: ${following.name}`
+			: `${done} done. Every ${state.isPriority ? 'priority' : 'layer'} is reviewed.`
 
 		return { ...next, ...moved, toast }
 	}
@@ -141,16 +166,51 @@ function applyViewed(state: PanelState, paths: ReadonlySet<string>, silent = fal
 	return next
 }
 
-function relabel(state: PanelState, layers: PanelLayer[], status: string): PanelState {
+// New sections keep the reviewer on the same file wherever it landed.
+function showSections(state: PanelState, layers: PanelLayer[]): PanelState {
 	const path = currentFile(state)?.path
 	const moved = readingOrder(layers).find(
 		(entry) => layers[entry.layerIndex]?.files[entry.fileIndex]?.path === path,
 	)
 
-	return clampPosition({ ...state, ...moved, layers, status, isAnalyzing: false })
+	return clampPosition({ ...state, ...moved, layers })
+}
+
+function setMode(state: PanelState, mode: ViewMode): PanelState {
+	const isRaw = mode === 'files'
+	const isPriority = mode === 'files' ? state.isPriority : mode === 'priority'
+	if (isRaw === state.isRaw && isPriority === state.isPriority) return state
+
+	const next = { ...state, isRaw, isPriority }
+
+	return isPriority === state.isPriority
+		? next
+		: showSections(next, isPriority ? state.priorityLayers : state.groupLayers)
+}
+
+function unfold(state: PanelState, id: string): PanelState {
+	const collapsedSections = new Set(state.collapsedSections)
+	collapsedSections.delete(id)
+
+	return { ...state, collapsedSections }
+}
+
+// Any move that lands on a file in a folded section unfolds it, so the highlighted file is never
+// hidden; folding the current section without moving leaves it folded.
+function unfoldCurrent(previous: PanelState, next: PanelState): PanelState {
+	const id = next.layers[next.layerIndex]?.id
+	if (next === previous || !id || !next.collapsedSections.has(id)) return next
+	const hasMoved =
+		previous.layers[previous.layerIndex]?.id !== id || previous.fileIndex !== next.fileIndex
+
+	return hasMoved ? unfold(next, id) : next
 }
 
 export function reducePanel(state: PanelState, action: PanelAction): PanelState {
+	return unfoldCurrent(state, reduce(state, action))
+}
+
+function reduce(state: PanelState, action: PanelAction): PanelState {
 	switch (action.type) {
 		case 'next-file':
 			return step(state, 1)
@@ -168,8 +228,27 @@ export function reducePanel(state: PanelState, action: PanelAction): PanelState 
 			return clampPosition({ ...state, layerIndex: action.layerIndex, fileIndex: action.fileIndex })
 		case 'analyzing':
 			return { ...state, status: action.status, isAnalyzing: true }
-		case 'labels':
-			return relabel(state, action.layers, action.status)
+		case 'labels': {
+			const next = {
+				...state,
+				groupLayers: action.layers,
+				status: action.status,
+				isAnalyzing: false,
+			}
+
+			return state.isPriority ? next : showSections(next, action.layers)
+		}
+		case 'priorities': {
+			const next = { ...state, priorityLayers: action.layers, priorityStatus: action.status }
+
+			return state.isPriority ? showSections(next, action.layers) : next
+		}
+		case 'set-mode':
+			return setMode(state, action.mode)
+		case 'toggle-section':
+			return state.collapsedSections.has(action.id)
+				? unfold(state, action.id)
+				: { ...state, collapsedSections: new Set([...state.collapsedSections, action.id]) }
 		case 'toggle-raw':
 			return { ...state, isRaw: !state.isRaw }
 		case 'toggle-collapsed':
@@ -194,21 +273,34 @@ export interface PanelStoreOptions {
 	viewed?: ReadonlySet<string>
 	status: string
 	savePosition: (position: PanelPosition) => void
+	/** Priority Review is offered only where its sections are given. */
+	priorityLayers?: PanelLayer[]
+	priorityStatus?: string
+	collapsedSections?: Iterable<string>
 }
 
 export function createPanelStore(layers: PanelLayer[], options: PanelStoreOptions): PanelStore {
-	const { position, savePosition } = options
-	let state = clampPosition({
-		layers,
+	const { position, savePosition, priorityLayers } = options
+	const isPriority = position?.isPriority === true && priorityLayers !== undefined
+	const initial = clampPosition({
+		layers: isPriority ? priorityLayers : layers,
+		groupLayers: layers,
+		priorityLayers: priorityLayers ?? [],
 		layerIndex: position?.layerIndex ?? 0,
 		fileIndex: position?.fileIndex ?? 0,
 		isRaw: position?.isRaw === true,
 		isCollapsed: position?.isCollapsed === true,
+		isPriority,
 		viewed: options.viewed ?? new Set<string>(),
 		status: options.status,
+		priorityStatus: options.priorityStatus ?? '',
+		collapsedSections: new Set(options.collapsedSections),
 		isAnalyzing: false,
 		isTrailingExpanded: false,
 	})
+	const currentId = initial.layers[initial.layerIndex]?.id
+	let state =
+		currentId && initial.collapsedSections.has(currentId) ? unfold(initial, currentId) : initial
 	const listeners = new Set<() => void>()
 	let toastTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -220,6 +312,7 @@ export function createPanelStore(layers: PanelLayer[], options: PanelStoreOption
 			next.layerIndex !== state.layerIndex ||
 			next.fileIndex !== state.fileIndex ||
 			next.isRaw !== state.isRaw ||
+			next.isPriority !== state.isPriority ||
 			next.isCollapsed !== state.isCollapsed
 		const gainedToast = next.toast !== undefined && next.toast !== state.toast
 		state = next
@@ -230,6 +323,7 @@ export function createPanelStore(layers: PanelLayer[], options: PanelStoreOption
 				fileIndex: next.fileIndex,
 				isRaw: next.isRaw,
 				isCollapsed: next.isCollapsed,
+				isPriority: next.isPriority,
 			})
 		if (!gainedToast) return
 

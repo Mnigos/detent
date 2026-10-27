@@ -11,6 +11,11 @@ import {
 	type LabelLayersRequest,
 	resolveLayerLabels,
 } from '@/src/lib/model/label-layers'
+import {
+	PRIORITIZE_MESSAGE,
+	type PrioritizeRequest,
+	resolvePriorities,
+} from '@/src/lib/model/label-priorities'
 
 const isRequest = <T extends { type: string }>(message: unknown, type: T['type']): message is T =>
 	typeof message === 'object' && message !== null && 'type' in message && message.type === type
@@ -38,6 +43,15 @@ export default defineBackground(() => {
 				.then(sendResponse)
 				.catch((error: unknown) => {
 					console.warn('[detent] analysis failed', error)
+					sendResponse(undefined)
+				})
+			return true
+		}
+		if (isRequest<PrioritizeRequest>(message, PRIORITIZE_MESSAGE)) {
+			resolvePriorities(message)
+				.then(sendResponse)
+				.catch((error: unknown) => {
+					console.warn('[detent] ranking failed', error)
 					sendResponse(undefined)
 				})
 			return true

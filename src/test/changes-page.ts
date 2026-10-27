@@ -39,12 +39,17 @@ export const LAYERS = [
 
 export const pageState = (overrides: Partial<PanelState> = {}): PanelState => ({
 	layers: LAYERS,
+	groupLayers: LAYERS,
+	priorityLayers: [],
 	layerIndex: 1,
 	fileIndex: 1,
 	isRaw: false,
 	isCollapsed: false,
+	isPriority: false,
 	viewed: new Set([COMMAND]),
 	status: 'Layer names come from the file structure.',
+	priorityStatus: '',
+	collapsedSections: new Set(),
 	isAnalyzing: false,
 	isTrailingExpanded: false,
 	...overrides,
