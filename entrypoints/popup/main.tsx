@@ -12,7 +12,7 @@ const root = createRoot(container)
 root.render(
 	<App
 		key="loading"
-		settings={{ openRouterKey: '', model: DEFAULT_MODEL }}
+		settings={{ openRouterKey: '', model: DEFAULT_MODEL, isEnabled: true, showListStats: true }}
 		usage={EMPTY_USAGE}
 		isLoading
 	/>,

@@ -23,6 +23,8 @@ interface AppProps {
 export function App({ settings, usage: initialUsage, isLoading = false }: AppProps) {
 	const [usage, setUsage] = useState(initialUsage)
 	const [key, setKey] = useState(settings.openRouterKey)
+	const [isEnabled, setIsEnabled] = useState(settings.isEnabled)
+	const [showListStats, setShowListStats] = useState(settings.showListStats)
 	const [model, setModel] = useState(settings.model)
 	const [notice, setNotice] = useState('')
 	const [isTesting, setIsTesting] = useState(false)
@@ -35,6 +37,16 @@ export function App({ settings, usage: initialUsage, isLoading = false }: AppPro
 		setKey(saved.openRouterKey)
 		setModel(saved.model)
 		setNotice('Saved.')
+	}
+
+	async function toggleEnabled(next: boolean) {
+		setIsEnabled(next)
+		await writeSettings({ isEnabled: next })
+	}
+
+	async function toggleListStats(next: boolean) {
+		setShowListStats(next)
+		await writeSettings({ showListStats: next })
 	}
 
 	async function reset() {
@@ -60,6 +72,24 @@ export function App({ settings, usage: initialUsage, isLoading = false }: AppPro
 	return (
 		<main className="flex w-[28rem] flex-col gap-3 bg-neutral-950 p-4 text-neutral-100">
 			<h1 className="font-semibold text-base">detent for GitHub</h1>
+			<label className="flex items-center gap-2 text-neutral-300 text-sm">
+				<input
+					type="checkbox"
+					disabled={isLoading}
+					checked={isEnabled}
+					onChange={(event) => void toggleEnabled(event.target.checked)}
+				/>
+				Group pull request files into layers
+			</label>
+			<label className="flex items-center gap-2 text-neutral-300 text-sm">
+				<input
+					type="checkbox"
+					disabled={isLoading}
+					checked={showListStats}
+					onChange={(event) => void toggleListStats(event.target.checked)}
+				/>
+				Show diff size on pull request lists
+			</label>
 			<label className="flex flex-col gap-1 text-neutral-400 text-xs">
 				OpenRouter API key
 				<input

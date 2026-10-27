@@ -1,6 +1,10 @@
+import { browser } from 'wxt/browser'
+import { parsePullsListUrl } from '@/src/lib/list/rows'
 import { LOADING_TEXT, showAnalysisBadge } from '@/src/lib/panel/analysis-badge'
 import { observeMutations } from '@/src/lib/panel/github-dom'
 import { parsePullRequestUrl } from '@/src/lib/pull-request-url'
+import { readSettings } from '@/src/lib/settings'
+import { startListStats } from '@/src/list/mount'
 import { startPanel } from '@/src/panel/mount'
 import { startTree } from '@/src/tree/mount'
 
@@ -30,14 +34,30 @@ export default defineContentScript({
 	cssInjectionMode: 'ui',
 	main(ctx) {
 		let panel: { mount: () => void; remove: () => void } | undefined
-		let mounted = ''
+		// undefined forces the next sync() through, including to tear a view down when its key is ''.
+		let mounted: string | undefined = ''
 		let generation = 0
 
 		async function sync() {
 			const location = parsePullRequestUrl(window.location.href)
-			const view =
-				location?.tab === 'files' ? 'panel' : location?.tab === 'changes' ? 'tree' : undefined
-			const key = view ? `${view}:${location?.owner}/${location?.repo}/${location?.number}` : ''
+			const list = parsePullsListUrl(window.location.href)
+			const { isEnabled, showListStats } = await readSettings()
+			const view = !isEnabled
+				? undefined
+				: location?.tab === 'files'
+					? 'panel'
+					: location?.tab === 'changes'
+						? 'tree'
+						: list && showListStats
+							? 'list'
+							: undefined
+			// A list keeps its view across filters and pages; its observer picks up the new rows.
+			const key =
+				view === 'list'
+					? `list:${list?.owner}/${list?.repo}`
+					: view
+						? `${view}:${location?.owner}/${location?.repo}/${location?.number}`
+						: ''
 			if (key === mounted && generation > 0) return
 
 			mounted = key
@@ -46,12 +66,16 @@ export default defineContentScript({
 			panel?.remove()
 			panel = undefined
 			document.getElementById(FAILURE_ID)?.remove()
-			showAnalysisBadge(Boolean(view), LOADING_TEXT)
-			if (!location || !view) return
+			showAnalysisBadge(Boolean(view) && view !== 'list', LOADING_TEXT)
+			if (!view) return
 
 			try {
 				const next =
-					view === 'tree' ? await startTree(ctx, location) : await startPanel(ctx, location)
+					view === 'list'
+						? await startListStats()
+						: location &&
+							(view === 'tree' ? await startTree(ctx, location) : await startPanel(ctx, location))
+				if (!next) return
 				if (current !== generation) return next.remove()
 
 				panel = next
@@ -61,13 +85,20 @@ export default defineContentScript({
 				showAnalysisBadge(false)
 				// A retry starts the page over: the mounted key is forgotten so sync() mounts again.
 				showFailure(error, () => {
-					mounted = ''
+					mounted = undefined
 					void sync()
 				})
 			}
 		}
 
 		void sync()
+		// Switching the extension off or on in the popup applies to open pages at once.
+		browser.storage.onChanged.addListener((changes, area) => {
+			if (area !== 'local' || !changes.settings) return
+
+			mounted = undefined
+			void sync()
+		})
 		// GitHub navigates with pushState; currententrychange covers it, navigatesuccess the rest.
 		if (window.navigation) {
 			window.navigation.addEventListener('currententrychange', () => void sync())
