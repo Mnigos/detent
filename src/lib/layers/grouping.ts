@@ -66,6 +66,30 @@ export function parseGroupingResponse(text: string): GroupingEntry[] | undefined
 	}
 }
 
+const DEFINITION = /^(.+)\.(?:query|command|event)\.(?:ts|tsx|js|mts)$/
+const HANDLER = /^(.+)\.handler\.(?:ts|tsx|js|mts)$/
+
+/** A CQRS query, command or event reads as one step with its handler, so a split pair is reunited. */
+function keepDefinitionsWithHandlers(groups: { files: string[] }[]) {
+	const handlers = new Map(
+		groups.flatMap((group) =>
+			group.files.flatMap((path) => {
+				const stem = HANDLER.exec(path)?.[1]
+				return stem === undefined ? [] : [[stem, { group, path }] as const]
+			}),
+		),
+	)
+	for (const group of groups) {
+		for (const path of [...group.files]) {
+			const handler = handlers.get(DEFINITION.exec(path)?.[1] ?? '')
+			if (!handler || handler.group === group) continue
+
+			group.files = group.files.filter((file) => file !== path)
+			handler.group.files.splice(handler.group.files.indexOf(handler.path), 0, path)
+		}
+	}
+}
+
 export function applyGrouping(
 	skeleton: Skeleton,
 	entries: GroupingEntry[],
@@ -89,6 +113,7 @@ export function applyGrouping(
 		})
 		.filter((group) => group.files.length > 0)
 	if (groups.length === 0) return undefined
+	keepDefinitionsWithHandlers(groups)
 
 	// A test belongs right after the file it tests, whether the model forgot it or put it elsewhere.
 	const stems = new Map(

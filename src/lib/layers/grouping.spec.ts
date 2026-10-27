@@ -239,6 +239,52 @@ describe('applyGrouping', () => {
 		},
 	)
 
+	describe('CQRS definitions and handlers', () => {
+		const QUERY = 'apps/api/src/queries/get-friends-activity.query.ts'
+		const HANDLER = 'apps/api/src/queries/get-friends-activity.handler.ts'
+		const MODULE = 'apps/api/src/friends.module.ts'
+		const cqrs: Skeleton = {
+			...skeleton,
+			layers: [
+				{
+					id: 'api',
+					fallbackName: 'api',
+					rank: 1,
+					isTrailing: false,
+					files: [CONTRACT, QUERY, HANDLER, MODULE].map((path) => ({ path, role: 'server' })),
+				},
+			],
+		}
+
+		it('moves a definition into the group of its handler, right before it', () => {
+			const layers = applyGrouping(cqrs, [
+				entry('Contract and query', CONTRACT, QUERY),
+				entry('Handler', MODULE, HANDLER),
+			])
+
+			expect(pathsOf(layers)).toEqual([[CONTRACT], [MODULE, QUERY, HANDLER]])
+		})
+
+		it('drops the group the definition leaves empty', () => {
+			const layers = applyGrouping(cqrs, [
+				entry('Query', QUERY),
+				entry('Rest', CONTRACT, HANDLER, MODULE),
+			])
+
+			expect(layers?.map((layer) => layer.name)).toEqual(['Rest'])
+			expect(pathsOf(layers)).toEqual([[CONTRACT, QUERY, HANDLER, MODULE]])
+		})
+
+		it('leaves a pair already together in its order', () => {
+			const layers = applyGrouping(cqrs, [
+				entry('Handler first', HANDLER, MODULE, QUERY),
+				entry('Contract', CONTRACT),
+			])
+
+			expect(pathsOf(layers)).toEqual([[HANDLER, MODULE, QUERY], [CONTRACT]])
+		})
+	})
+
 	it('names a blank layer after its files', () => {
 		const layers = applyGrouping(skeleton, [
 			entry('  ', CONTRACT, SCHEMA),
