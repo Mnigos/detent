@@ -51,6 +51,12 @@ export default defineContentScript({
 						: list && showListStats
 							? 'list'
 							: undefined
+			if (view && view !== 'list') {
+				// A #diff- hash left by an earlier visit would make GitHub scroll to that file at load.
+				if (window.location.hash.startsWith('#diff-'))
+					history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+				history.scrollRestoration = 'manual'
+			}
 			// A list keeps its view across filters and pages; its observer picks up the new rows.
 			const key =
 				view === 'list'
