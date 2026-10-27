@@ -45,8 +45,8 @@ On the pull request page:
 
 A model is optional. Add an OpenRouter API key in the popup and pick a model: it names and orders
 the steps, following a description that tells reviewers where to start, and ranks the files for
-Priority Review. It is asked once per pull request revision and the answers are cached in the
-browser. Without a key the steps come from the file structure and the priorities
+Priority Review. Grouping and Priority Review are separate requests, each cached in the browser per
+pull request, model and diff revision, so switching models or pushing new commits asks again. Without a key the steps come from the file structure and the priorities
 from file paths and change sizes, computed locally. The popup shows what your requests cost so
 far, and has switches to turn detent off or to hide the list diff sizes.
 
