@@ -29,9 +29,49 @@ beforeEach(async () => {
 afterEach(() => {
 	view.detach()
 	vi.useRealTimers()
+	vi.unstubAllGlobals()
+	vi.restoreAllMocks()
 })
 
 describe('layer diffs', () => {
+	it('holds the original viewport while regrouping moves the diff entries', () => {
+		const state = pageState()
+		view.apply(list, state)
+		vi.stubGlobal('scrollY', 480)
+		vi.stubGlobal('scrollTo', vi.fn())
+		const layout = vi.spyOn(list, 'offsetHeight', 'get').mockImplementation(() => {
+			expect(list.style.overflowAnchor).toBe('none')
+			vi.stubGlobal('scrollY', 960)
+
+			return 1200
+		})
+
+		view.apply(list, { ...state, layers: [...state.layers].reverse() })
+
+		expect(layout).toHaveBeenCalled()
+		expect(window.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 480 })
+		expect(list.style.overflowAnchor).toBe('')
+	})
+
+	it('does not correct the viewport when reapplying the same layers', async () => {
+		const state = pageState()
+		view.apply(list, state)
+		vi.stubGlobal('scrollY', 480)
+		vi.stubGlobal('scrollTo', vi.fn())
+		vi.spyOn(list, 'offsetHeight', 'get').mockImplementation(() => {
+			vi.stubGlobal('scrollY', 960)
+
+			return 1200
+		})
+
+		view.apply(list, { ...state, layerIndex: 0, fileIndex: 0 })
+		await vi.advanceTimersByTimeAsync(50)
+
+		expect(entryOf(ENV_ANCHOR)?.style.opacity).toBe('')
+		expect(window.scrollTo).not.toHaveBeenCalled()
+		expect(list.style.overflowAnchor).toBe('')
+	})
+
 	it('orders wrappers and headers by layer without moving GitHub nodes', () => {
 		const original = [...list.children]
 		const state = pageState()

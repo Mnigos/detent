@@ -57,7 +57,7 @@ const splitIntent = (name: string) =>
 
 // Chrome ends an idle MV3 worker after 30 seconds; a model call on a large pull request takes
 // longer. Any extension API call resets that clock, so one is made while the request runs.
-function keepWorkerAlive(): () => void {
+export function keepWorkerAlive(): () => void {
 	const timer = setInterval(() => {
 		void browser.runtime.getPlatformInfo().catch(() => undefined)
 	}, KEEPALIVE_MILLISECONDS)
@@ -105,7 +105,7 @@ async function fromOpenRouter(
 	}
 }
 
-function withExcerpts(
+export function withExcerpts(
 	input: string,
 	excerpts: Record<string, string> | undefined,
 	paths?: Iterable<string>,

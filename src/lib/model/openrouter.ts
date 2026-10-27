@@ -1,5 +1,7 @@
 import { GROUPING_SCHEMA, type GroupingEntry, parseGroupingResponse } from '../layers/grouping'
+import { PRIORITY_SCHEMA, type PriorityEntry, parsePriorityResponse } from '../priority/schema'
 import { type UsageDelta, usageOf } from './usage'
+
 export const LABEL_TIMEOUT_MILLISECONDS = 20_000
 const MAX_TIMEOUT_MILLISECONDS = 180_000
 const MAX_ANSWER_TOKENS = 32_000
@@ -11,8 +13,10 @@ export const timeoutFor = (input: string) =>
 		MAX_TIMEOUT_MILLISECONDS,
 		LABEL_TIMEOUT_MILLISECONDS + Math.ceil(input.length / 2000) * 1000,
 	)
-export const answerTokensFor = (input: string) =>
-	Math.min(MAX_ANSWER_TOKENS, 4000 + (input.match(/ @\d+$/gm)?.length ?? 0) * 24)
+export const answerTokensFor = (input: string, tokensPerFile = 24) =>
+	Math.min(MAX_ANSWER_TOKENS, 4000 + (input.match(/ @\d+$/gm)?.length ?? 0) * tokensPerFile)
+// A ranked file is its number, its priority and often a reason line.
+const PRIORITY_TOKENS_PER_FILE = 40
 
 export const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -28,6 +32,12 @@ export interface OpenRouterCall {
 
 export interface OpenRouterGrouping {
 	layers?: GroupingEntry[]
+	error?: OpenRouterError
+	usage?: UsageDelta
+}
+
+export interface OpenRouterPriorities {
+	priorities?: PriorityEntry[]
 	error?: OpenRouterError
 	usage?: UsageDelta
 }
@@ -110,6 +120,30 @@ export async function groupLayersWithOpenRouter({
 	const layers = parseGroupingResponse(content ?? '')
 
 	return layers ? { layers, usage } : { error: { kind: 'invalid' }, usage }
+}
+
+export async function prioritizeWithOpenRouter({
+	input,
+	...call
+}: OpenRouterCall & { input: string }): Promise<OpenRouterPriorities> {
+	const { content, error, usage } = await complete(
+		call,
+		{
+			messages: [{ role: 'user', content: input }],
+			response_format: {
+				type: 'json_schema',
+				json_schema: { name: 'priorities', strict: true, schema: PRIORITY_SCHEMA },
+			},
+			reasoning: { effort: 'low' },
+			max_tokens: answerTokensFor(input, PRIORITY_TOKENS_PER_FILE),
+		},
+		timeoutFor(input),
+	)
+	if (error) return { error, usage }
+
+	const priorities = parsePriorityResponse(content ?? '')
+
+	return priorities ? { priorities, usage } : { error: { kind: 'invalid' }, usage }
 }
 
 export async function testOpenRouter(call: OpenRouterCall): Promise<OpenRouterError | undefined> {

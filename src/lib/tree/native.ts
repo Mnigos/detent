@@ -83,25 +83,36 @@ export const regionsByPath = (anchorIds: ReadonlyMap<string, string>) =>
 		return section ? [{ path, section }] : []
 	})
 
-export function scrollToAnchor(anchorId: string): void {
-	if (window.location.hash !== `#${anchorId}`) {
-		window.location.hash = anchorId
-		requestAnimationFrame(() => {
-			if (window.location.hash !== `#${anchorId}`) return
-			const region = document.getElementById(anchorId)
-			if (region) scrollToSection(region)
-		})
+// The hash makes GitHub load a file it has not rendered yet; once the reorder settles the region
+// is corrected under the sticky header. A stale navigation is ignored.
+function navigateToAnchor(anchorId: string): void {
+	if (window.location.hash === `#${anchorId}`) {
+		const region = document.getElementById(anchorId)
+		if (region) scrollToSection(region)
 
 		return
 	}
+	window.location.hash = anchorId
+	requestAnimationFrame(() => {
+		if (window.location.hash !== `#${anchorId}`) return
+		const region = document.getElementById(anchorId)
+		if (region) scrollToSection(region)
+	})
+}
+
+// A rendered region is scrolled to directly: setting the hash would make the browser jump to it
+// first and then jump again to the corrected offset.
+export function scrollToAnchor(anchorId: string): void {
 	const region = document.getElementById(anchorId)
 	if (region) scrollToSection(region)
+	else navigateToAnchor(anchorId)
 }
 
 export async function toggleViewedInHeader(anchorId: string): Promise<boolean> {
 	let button = viewedButton(anchorId)
 	for (let attempt = 0; !button && attempt < LOAD_ATTEMPTS; attempt += 1) {
-		if (attempt === 0) scrollToAnchor(anchorId)
+		// A placeholder region exists before its header does; the hash is what makes GitHub load it.
+		if (attempt === 0) navigateToAnchor(anchorId)
 		await new Promise((resolve) => setTimeout(resolve, LOAD_INTERVAL_MILLISECONDS))
 		button = viewedButton(anchorId)
 	}

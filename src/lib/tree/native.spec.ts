@@ -64,28 +64,35 @@ describe('readViewed', () => {
 })
 
 describe('scrollToAnchor', () => {
-	it('sets the hash once and scrolls to the region when the hash already points at it', () => {
+	const region = (id: string) =>
+		document.body.append(Object.assign(document.createElement('div'), { id, role: 'region' }))
+
+	it('scrolls to a rendered region directly without touching the hash', () => {
 		scrollToAnchor(ENV_ANCHOR)
 
-		expect(window.location.hash).toBe(`#${ENV_ANCHOR}`)
-		expect(window.scrollTo).not.toHaveBeenCalled()
-
-		scrollToAnchor(ENV_ANCHOR)
-
+		expect(window.location.hash).toBe('')
 		expect(window.scrollTo).toHaveBeenCalledTimes(1)
 	})
 
-	it('corrects the reordered destination after hash navigation and ignores stale navigation', async () => {
-		vi.useFakeTimers()
-		scrollToAnchor(ENV_ANCHOR)
+	it('sets the hash for a missing region and corrects the reordered destination once it loads', async () => {
+		scrollToAnchor('diff-missing')
+
+		expect(window.location.hash).toBe('#diff-missing')
+		expect(window.scrollTo).not.toHaveBeenCalled()
+
+		region('diff-missing')
 		await vi.advanceTimersByTimeAsync(20)
 		expect(window.scrollTo).toHaveBeenCalledTimes(1)
-		vi.mocked(window.scrollTo).mockClear()
+	})
 
-		scrollToAnchor(HANDLER_SPEC_ANCHOR)
-		scrollToAnchor(ENV_ANCHOR)
+	it('ignores stale hash navigation to missing regions', async () => {
+		scrollToAnchor('diff-first')
+		scrollToAnchor('diff-second')
+		region('diff-first')
+		region('diff-second')
 		await vi.advanceTimersByTimeAsync(20)
-		expect(window.location.hash).toBe(`#${ENV_ANCHOR}`)
+
+		expect(window.location.hash).toBe('#diff-second')
 		expect(window.scrollTo).toHaveBeenCalledTimes(1)
 	})
 })

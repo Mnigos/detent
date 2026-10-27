@@ -34,17 +34,25 @@ export async function readUsage(): Promise<Usage> {
 	}
 }
 
-export async function recordUsage(delta: UsageDelta): Promise<Usage> {
-	const previous = await readUsage()
-	const usage: Usage = {
-		requests: previous.requests + 1,
-		promptTokens: previous.promptTokens + delta.promptTokens,
-		completionTokens: previous.completionTokens + delta.completionTokens,
-		cost: previous.cost + delta.cost,
-	}
-	await browser.storage.local.set({ [USAGE_KEY]: usage })
+let pending: Promise<unknown> = Promise.resolve()
 
-	return usage
+// Grouping and ranking answers land together; one queue keeps each read-add-write from losing the other.
+export function recordUsage(delta: UsageDelta): Promise<Usage> {
+	const write = pending.then(async () => {
+		const previous = await readUsage()
+		const usage: Usage = {
+			requests: previous.requests + 1,
+			promptTokens: previous.promptTokens + delta.promptTokens,
+			completionTokens: previous.completionTokens + delta.completionTokens,
+			cost: previous.cost + delta.cost,
+		}
+		await browser.storage.local.set({ [USAGE_KEY]: usage })
+
+		return usage
+	})
+	pending = write.catch(() => undefined)
+
+	return write
 }
 
 export async function resetUsage(): Promise<void> {

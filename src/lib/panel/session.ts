@@ -10,6 +10,9 @@ import { applyGrouping } from '../layers/grouping'
 import { applyLabels, type LabeledLayer } from '../layers/label-schema'
 import { orderReviewLayers } from '../layers/reading-order'
 import { requestLayerLabels } from '../model/label-layers'
+import { createPriorityRequest, planPriorities } from '../priority/ranking'
+import { COLLAPSED_PRIORITY_SECTIONS } from '../priority/sections'
+import { PRIORITY_LINES } from '../priority/status'
 import type { PullRequestLocation } from '../pull-request-url'
 import { anchorIdForPath, fetchPullRequestBody, readPullRequestSummary } from './github-dom'
 import { STATUS_LINES, statusLineFor } from './status'
@@ -25,6 +28,12 @@ export interface ReviewSession {
 	store: PanelStore
 	anchorIds: ReadonlyMap<string, string>
 	stop: () => void
+	/** Asks the model for priorities once; absent where Priority Review is not offered. */
+	requestPriorities?: () => void
+}
+
+export interface ReviewSessionOptions {
+	withPriorities?: boolean
 }
 
 interface SavedPosition extends PanelPosition {
@@ -45,6 +54,7 @@ export async function createReviewSession(
 	ctx: ContentScriptContext,
 	location: PullRequestLocation,
 	readViewed: (anchorIds: ReadonlyMap<string, string>) => ReadonlySet<string>,
+	{ withPriorities = false }: ReviewSessionOptions = {},
 ): Promise<ReviewSession> {
 	const text = await requestPullRequestDiff(location)
 	const files = parseUnifiedDiff(text)
@@ -116,8 +126,10 @@ export async function createReviewSession(
 			? applyLabels(skeleton, cached.layers)
 			: undefined
 	const layers = toPanelLayers(labeled ?? applyLabels(skeleton, []))
+	const priorities = withPriorities ? planPriorities(files, layers, summary) : undefined
 	const position = (await readPosition(key)) ?? (await readPosition(`panel:${digest}`))
-	const layerIndex = layers.findIndex((layer) =>
+	const shown = position?.isPriority && priorities ? priorities.sections : layers
+	const layerIndex = shown.findIndex((layer) =>
 		layer.files.some((file) => file.path === position?.path),
 	)
 	const savedPosition =
@@ -126,13 +138,20 @@ export async function createReviewSession(
 					...position,
 					layerIndex,
 					fileIndex:
-						layers[layerIndex]?.files.findIndex((file) => file.path === position?.path) ?? 0,
+						shown[layerIndex]?.files.findIndex((file) => file.path === position?.path) ?? 0,
 				}
 			: position
 	const store = createPanelStore(layers, {
 		position: savedPosition,
 		viewed: readViewed(anchorIds),
 		status: cached ? statusLineFor(cached) : STATUS_LINES.fallback,
+		...(priorities
+			? {
+					priorityLayers: priorities.sections,
+					priorityStatus: PRIORITY_LINES.fallback,
+					collapsedSections: COLLAPSED_PRIORITY_SECTIONS,
+				}
+			: {}),
 		savePosition: (position) => {
 			void browser.storage.session
 				.set({ [key]: { ...position, path: currentFile(store.getSnapshot())?.path } })
@@ -152,8 +171,8 @@ export async function createReviewSession(
 		if (stopped || !ctx.isValid) return
 		// No reply at all means the worker went away mid-request; say so instead of spinning forever.
 		if (!response) {
-			const state = store.getSnapshot()
-			store.dispatch({ type: 'labels', layers: state.layers, status: STATUS_LINES.interrupted })
+			const { groupLayers } = store.getSnapshot()
+			store.dispatch({ type: 'labels', layers: groupLayers, status: STATUS_LINES.interrupted })
 			return
 		}
 
@@ -177,5 +196,17 @@ export async function createReviewSession(
 		stop() {
 			stopped = true
 		},
+		...(priorities
+			? {
+					requestPriorities: createPriorityRequest({
+						plan: priorities,
+						store,
+						scope,
+						digest,
+						diffExcerpts: analysisRequest.diffExcerpts,
+						isActive: () => !stopped && ctx.isValid,
+					}),
+				}
+			: {}),
 	}
 }

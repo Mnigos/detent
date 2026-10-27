@@ -6,7 +6,9 @@ import {
 	type PanelPosition,
 	type PanelState,
 	reducePanel,
+	statusOf,
 	TOAST_MILLISECONDS,
+	viewModeOf,
 } from './store'
 
 const layer = (id: string, ...paths: string[]): PanelLayer => ({
@@ -21,12 +23,17 @@ const LAYERS = [layer('a', 'a1', 'a2', 'a3'), layer('b', 'b1'), layer('c', 'c1',
 
 const state = (overrides: Partial<PanelState> = {}): PanelState => ({
 	layers: LAYERS,
+	groupLayers: LAYERS,
+	priorityLayers: [],
 	layerIndex: 0,
 	fileIndex: 0,
 	isRaw: false,
 	isCollapsed: false,
+	isPriority: false,
 	viewed: new Set(),
 	status: 'Layer names come from the file structure.',
+	priorityStatus: '',
+	collapsedSections: new Set(),
 	isAnalyzing: false,
 	isTrailingExpanded: false,
 	...overrides,
@@ -237,7 +244,13 @@ describe('createPanelStore', () => {
 		store.dispatch({ type: 'next-file' })
 		store.dispatch({ type: 'toggle-raw' })
 
-		expect(saved.at(-1)).toEqual({ layerIndex: 0, fileIndex: 1, isRaw: true, isCollapsed: false })
+		expect(saved.at(-1)).toEqual({
+			layerIndex: 0,
+			fileIndex: 1,
+			isRaw: true,
+			isCollapsed: false,
+			isPriority: false,
+		})
 
 		const restored = createPanelStore(LAYERS, {
 			position: saved.at(-1),
@@ -297,5 +310,177 @@ describe('createPanelStore', () => {
 
 		expect(store.getSnapshot().toast).toBeUndefined()
 		vi.useRealTimers()
+	})
+})
+
+describe('Priority Review', () => {
+	const section = (name: string, ...paths: string[]): PanelLayer => ({
+		...layer(name.toLowerCase(), ...paths),
+		id: `priority:${name.toLowerCase()}`,
+		name,
+		isCollapsible: true,
+	})
+	const PRIORITY = [section('Urgent', 'c2', 'a2'), section('High', 'b1'), section('Low', 'a1')]
+	const options = {
+		savePosition: () => undefined,
+		status: 'Layer names come from the file structure.',
+		priorityLayers: PRIORITY,
+		priorityStatus: 'Priorities come from the file structure.',
+		collapsedSections: ['priority:low'],
+	}
+
+	it('switches between layers, priorities and files, keeping the current file', () => {
+		const saved: PanelPosition[] = []
+		const store = createPanelStore(LAYERS, {
+			...options,
+			savePosition: (position) => saved.push(position),
+		})
+		store.dispatch({ type: 'select', layerIndex: 0, fileIndex: 1 })
+		store.dispatch({ type: 'set-mode', mode: 'priority' })
+
+		expect(store.getSnapshot().layers).toBe(PRIORITY)
+		expect(currentFile(store.getSnapshot())?.path).toBe('a2')
+		expect(viewModeOf(store.getSnapshot())).toBe('priority')
+		expect(statusOf(store.getSnapshot())).toBe('Priorities come from the file structure.')
+		expect(saved.at(-1)).toMatchObject({ isPriority: true, isRaw: false, layerIndex: 0 })
+
+		store.dispatch({ type: 'set-mode', mode: 'files' })
+		expect(viewModeOf(store.getSnapshot())).toBe('files')
+		expect(statusOf(store.getSnapshot())).toBe('Layer names come from the file structure.')
+		store.dispatch({ type: 'toggle-raw' })
+		expect(viewModeOf(store.getSnapshot())).toBe('priority')
+
+		store.dispatch({ type: 'set-mode', mode: 'layers' })
+		expect(store.getSnapshot().layers).toBe(LAYERS)
+		expect(currentFile(store.getSnapshot())?.path).toBe('a2')
+	})
+
+	it('restores Priority Review only where priority sections are offered', () => {
+		const position = { layerIndex: 1, fileIndex: 0, isPriority: true }
+		const restored = createPanelStore(LAYERS, { ...options, position })
+		const classic = createPanelStore(LAYERS, {
+			savePosition: () => undefined,
+			status: '',
+			position,
+		})
+
+		expect(currentFile(restored.getSnapshot())?.path).toBe('b1')
+		expect(classic.getSnapshot()).toMatchObject({ isPriority: false, layers: LAYERS })
+	})
+
+	it('keeps new groups and new priorities apart and shows only those of the current mode', () => {
+		const store = createPanelStore(LAYERS, { ...options, position: { isPriority: true } })
+		const regrouped = [layer('z', 'a1', 'a2', 'a3', 'b1', 'c1', 'c2')]
+		store.dispatch({ type: 'labels', layers: regrouped, status: 'Layer names from m.' })
+
+		expect(store.getSnapshot()).toMatchObject({ layers: PRIORITY, groupLayers: regrouped })
+
+		const ranked = [section('Urgent', 'b1')]
+		store.dispatch({ type: 'priorities', layers: ranked, status: 'Priorities from m.' })
+		expect(store.getSnapshot()).toMatchObject({
+			layers: ranked,
+			priorityStatus: 'Priorities from m.',
+		})
+		store.dispatch({ type: 'set-mode', mode: 'layers' })
+		expect(store.getSnapshot().layers).toBe(regrouped)
+	})
+
+	it('keeps a folded current section folded until j moves within it, then unfolds it', () => {
+		const store = createPanelStore(LAYERS, {
+			...options,
+			position: { isPriority: true, layerIndex: 0, fileIndex: 0 },
+		})
+		store.dispatch({ type: 'toggle-section', id: 'priority:urgent' })
+		expect(store.getSnapshot().collapsedSections).toEqual(
+			new Set(['priority:low', 'priority:urgent']),
+		)
+		expect(currentFile(store.getSnapshot())?.path).toBe('c2')
+
+		store.dispatch({ type: 'next-file' })
+		expect(currentFile(store.getSnapshot())?.path).toBe('a2')
+		expect(store.getSnapshot().collapsedSections).toEqual(new Set(['priority:low']))
+
+		store.dispatch({ type: 'next-file' })
+		store.dispatch({ type: 'next-file' })
+		expect(currentFile(store.getSnapshot())?.path).toBe('a1')
+		expect(store.getSnapshot().collapsedSections.size).toBe(0)
+	})
+
+	it('names the finished priority in the toast and unfolds the section it moves to', () => {
+		const next = reducePanel(
+			state({
+				layers: PRIORITY,
+				priorityLayers: PRIORITY,
+				isPriority: true,
+				layerIndex: 1,
+				collapsedSections: new Set(['priority:low']),
+			}),
+			{ type: 'viewed', paths: new Set(['b1']) },
+		)
+
+		expect(next.toast).toBe('High done. Next: Low')
+		expect(next.collapsedSections.size).toBe(0)
+	})
+
+	it.each(['layers', 'priority'] as const)(
+		'r returns from Files to the previous %s mode without moving',
+		(mode) => {
+			const store = createPanelStore(LAYERS, options)
+			store.dispatch({ type: 'select', layerIndex: 0, fileIndex: 1 })
+			store.dispatch({ type: 'set-mode', mode })
+			for (const expected of ['files', mode]) {
+				store.dispatch({ type: 'toggle-raw' })
+				expect(viewModeOf(store.getSnapshot())).toBe(expected)
+				expect(currentFile(store.getSnapshot())?.path).toBe('a2')
+			}
+		},
+	)
+
+	it('preserves the selected path through every directed mode transition', () => {
+		const store = createPanelStore(LAYERS, options)
+		store.dispatch({ type: 'select', layerIndex: 0, fileIndex: 1 })
+		for (const mode of ['priority', 'files', 'layers', 'files', 'priority', 'layers'] as const) {
+			store.dispatch({ type: 'set-mode', mode })
+			expect(viewModeOf(store.getSnapshot())).toBe(mode)
+			expect(currentFile(store.getSnapshot())?.path).toBe('a2')
+		}
+	})
+
+	it('unfolds Low when changing modes puts the selected file inside it', () => {
+		const store = createPanelStore(LAYERS, options)
+		store.dispatch({ type: 'set-mode', mode: 'priority' })
+		expect(currentFile(store.getSnapshot())?.path).toBe('a1')
+		expect(store.getSnapshot().collapsedSections.has('priority:low')).toBe(false)
+	})
+
+	it.each([
+		['next-file', 1, 'priority:low', 'a1'],
+		['previous-file', 1, 'priority:urgent', 'a2'],
+	] as const)(
+		'%s enters and unfolds a folded priority section',
+		(type, layerIndex, folded, expectedPath) => {
+			const store = createPanelStore(LAYERS, {
+				...options,
+				collapsedSections: [folded],
+				position: { isPriority: true, layerIndex },
+			})
+			store.dispatch({ type })
+			expect(currentFile(store.getSnapshot())?.path).toBe(expectedPath)
+			expect(store.getSnapshot().collapsedSections.has(folded)).toBe(false)
+		},
+	)
+
+	it.each([
+		['next-layer', 1, 'priority:low', 'a1'],
+		['previous-layer', 1, 'priority:urgent', 'c2'],
+	] as const)('%s unfolds the section it enters', (type, layerIndex, folded, expectedPath) => {
+		const store = createPanelStore(LAYERS, {
+			...options,
+			collapsedSections: [folded],
+			position: { isPriority: true, layerIndex },
+		})
+		store.dispatch({ type })
+		expect(currentFile(store.getSnapshot())?.path).toBe(expectedPath)
+		expect(store.getSnapshot().collapsedSections.has(folded)).toBe(false)
 	})
 })

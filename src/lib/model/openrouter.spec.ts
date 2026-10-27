@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GROUPING_SCHEMA } from '../layers/grouping'
+import { PRIORITY_SCHEMA } from '../priority/schema'
 import {
 	answerTokensFor,
 	groupLayersWithOpenRouter,
 	OPENROUTER_URL,
+	prioritizeWithOpenRouter,
 	testOpenRouter,
 	timeoutFor,
 } from './openrouter'
@@ -142,5 +144,73 @@ describe('testOpenRouter', () => {
 		stubFetch(new Response('', { status: 401 }))
 
 		await expect(testOpenRouter(call)).resolves.toEqual({ kind: 'unauthorized', status: 401 })
+	})
+})
+
+describe('prioritizeWithOpenRouter', () => {
+	it('uses the separate strict priority schema and numbered files with usage counting', async () => {
+		const input = '- src/a.ts [server] modified +20/-0 @1\n- src/b.ts [ui] modified +4/-0 @2'
+		const fetchMock = stubFetch(
+			completion(
+				JSON.stringify({
+					files: [
+						{ file: '@2', priority: 'high', reason: 'May hide checkout.' },
+						{ file: '@1', priority: 'low', reason: 'Discard.' },
+					],
+				}),
+			),
+		)
+		await expect(prioritizeWithOpenRouter({ ...call, input })).resolves.toEqual({
+			priorities: [
+				{ path: '@2', priority: 'high', reason: 'May hide checkout.' },
+				{ path: '@1', priority: 'low' },
+			],
+			usage: { promptTokens: 1200, completionTokens: 80, cost: 0.0031 },
+		})
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(OPENROUTER_URL)
+		expect(requestBody(fetchMock)).toEqual({
+			model: call.model,
+			messages: [{ role: 'user', content: input }],
+			response_format: {
+				type: 'json_schema',
+				json_schema: { name: 'priorities', strict: true, schema: PRIORITY_SCHEMA },
+			},
+			reasoning: { effort: 'low' },
+			max_tokens: 4080,
+			usage: { include: true },
+		})
+	})
+
+	it.each([
+		[401, 'unauthorized'],
+		[403, 'unauthorized'],
+		[402, 'credits'],
+		[429, 'request'],
+		[500, 'request'],
+	])('maps priority HTTP %i to %s', async (status, kind) => {
+		stubFetch(new Response('', { status }))
+		await expect(prioritizeWithOpenRouter(call)).resolves.toEqual({ error: { kind, status } })
+	})
+
+	it.each([
+		[new DOMException('deadline', 'TimeoutError'), 'timeout'],
+		[new TypeError('Failed to fetch'), 'request'],
+	])('maps rejected priority fetch %s to %s', async (error, kind) => {
+		stubFetch(error)
+		await expect(prioritizeWithOpenRouter(call)).resolves.toEqual({ error: { kind } })
+	})
+
+	it.each([
+		'not JSON',
+		'```json\n{"files":[]}\n```',
+		'{"files":[]}',
+		'{"files":[{"file":"@1","priority":"critical","reason":"bad"}]}',
+	])('rejects invalid priority content %s while retaining charged usage', async (content) => {
+		stubFetch(completion(content))
+		await expect(prioritizeWithOpenRouter(call)).resolves.toEqual({
+			error: { kind: 'invalid' },
+			usage: { promptTokens: 1200, completionTokens: 80, cost: 0.0031 },
+		})
 	})
 })
