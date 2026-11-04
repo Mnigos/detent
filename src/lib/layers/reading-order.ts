@@ -2,27 +2,75 @@ import type { Edge } from './graph'
 import type { LabeledLayer } from './label-schema'
 import { attachTests } from './test-subject'
 
+interface ComponentFrame {
+	path: string
+	pending: Iterator<string>
+}
+
+// An edge closes a cycle exactly when both of its ends sit in one strongly connected component.
+// One iterative Tarjan pass finds them all; a reachability search per edge took seconds per call
+// on a few hundred densely linked files and froze the page.
+function componentsOf(paths: string[], dependencies: Map<string, Set<string>>) {
+	const index = new Map<string, number>()
+	const lowLink = new Map<string, number>()
+	const component = new Map<string, number>()
+	const stack: string[] = []
+	const frames: ComponentFrame[] = []
+
+	function open(path: string) {
+		index.set(path, index.size)
+		lowLink.set(path, index.size - 1)
+		stack.push(path)
+		frames.push({ path, pending: (dependencies.get(path) ?? new Set<string>()).values() })
+	}
+
+	function lower(path: string, value: number | undefined) {
+		if (value !== undefined && value < (lowLink.get(path) ?? value)) lowLink.set(path, value)
+	}
+
+	for (const root of paths) {
+		if (index.has(root)) continue
+
+		open(root)
+		while (frames.length > 0) {
+			const frame = frames[frames.length - 1]
+			if (!frame) break
+
+			const next = frame.pending.next()
+			if (!next.done) {
+				if (!index.has(next.value)) open(next.value)
+				else if (!component.has(next.value)) lower(frame.path, index.get(next.value))
+				continue
+			}
+			frames.pop()
+			const parent = frames[frames.length - 1]
+			if (parent) lower(parent.path, lowLink.get(frame.path))
+			if (lowLink.get(frame.path) !== index.get(frame.path)) continue
+
+			const id = component.size
+			let member: string | undefined
+			do {
+				member = stack.pop()
+				if (member !== undefined) component.set(member, id)
+			} while (member !== undefined && member !== frame.path)
+		}
+	}
+
+	return component
+}
+
 function order(paths: string[], edges: Edge[]): string[] {
 	const known = new Set(paths)
 	const dependencies = new Map(paths.map((path) => [path, new Set<string>()]))
 	for (const { from, to } of edges)
 		if (known.has(from) && known.has(to) && from !== to) dependencies.get(from)?.add(to)
-	function reaches(start: string, target: string): boolean {
-		const pending = [start]
-		const visited = new Set<string>()
-		while (pending.length > 0) {
-			const path = pending.pop()
-			if (path === target) return true
-			if (!path || visited.has(path)) continue
-			visited.add(path)
-			pending.push(...(dependencies.get(path) ?? []))
-		}
-		return false
-	}
+	const components = componentsOf(paths, dependencies)
 	const acyclic = new Map(
 		paths.map((path) => [
 			path,
-			[...(dependencies.get(path) ?? [])].filter((dependency) => !reaches(dependency, path)),
+			[...(dependencies.get(path) ?? [])].filter(
+				(dependency) => components.get(dependency) !== components.get(path),
+			),
 		]),
 	)
 	const visited = new Set<string>()

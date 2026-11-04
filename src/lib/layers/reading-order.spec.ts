@@ -83,4 +83,28 @@ describe('dependency reading order', () => {
 			['definition', 'helper', 'caller', 'unrelated', 'test'],
 		])
 	})
+	it('breaks only the edges inside a cycle and still orders what the cycle depends on', () => {
+		const layers = [layer('all', 'a', 'b', 'c', 'base')]
+		const edges = [
+			{ from: 'a', to: 'b', kind: 'import' as const },
+			{ from: 'b', to: 'c', kind: 'import' as const },
+			{ from: 'c', to: 'a', kind: 'import' as const },
+			{ from: 'c', to: 'base', kind: 'import' as const },
+		]
+		expect(pathsOf(orderReviewLayers(layers, edges))).toEqual([['a', 'b', 'base', 'c']])
+	})
+	it('orders hundreds of densely linked files in well under a second', () => {
+		const paths = Array.from({ length: 600 }, (_, index) => `src/file-${index}.ts`)
+		const edges = paths.flatMap((from, index) =>
+			Array.from({ length: 12 }, (_, step) => ({
+				from,
+				to: paths[(index * 7 + step * 13 + 1) % paths.length] ?? from,
+				kind: 'cochange' as const,
+			})),
+		)
+		const started = performance.now()
+		const [ordered] = orderReviewLayers([layer('all', ...paths)], edges)
+		expect(performance.now() - started).toBeLessThan(1000)
+		expect(new Set(ordered?.files.map((file) => file.path))).toEqual(new Set(paths))
+	})
 })
