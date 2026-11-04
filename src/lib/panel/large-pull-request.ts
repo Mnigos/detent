@@ -26,20 +26,24 @@ function parseCount(text: string | null | undefined): number | undefined {
 	return Math.round(Number(match[1].replaceAll(',', '')) * (match[2] ? 1000 : 1))
 }
 
-// The tab link names its pull request, so a counter left over from the previous page never counts.
+// The tab link names its pull request, so a counter or tree left over from the previous page after a
+// soft navigation never counts: nothing is read while the page lacks this pull request's tab.
 function findFilesTab({ owner, repo, number }: PullRequestLocation, root: ParentNode) {
 	const base = `/${owner}/${repo}/pull/${number}`.toLowerCase()
 	const tabs = [`${base}/files`, `${base}/changes`]
+	const links = [...root.querySelectorAll<HTMLAnchorElement>('a[href*="/pull/"]')].filter(
+		(link) => {
+			const { pathname } = new URL(link.getAttribute('href') ?? '', 'https://github.com')
 
-	return [...root.querySelectorAll<HTMLAnchorElement>('a[href*="/pull/"]')].find((link) => {
-		const { pathname } = new URL(link.getAttribute('href') ?? '', 'https://github.com')
+			return tabs.includes(pathname.toLowerCase())
+		},
+	)
 
-		return tabs.includes(pathname.toLowerCase()) && link.querySelector(COUNTER)
-	})
+	return links.find((link) => link.querySelector(COUNTER)) ?? links[0]
 }
 
-function readLines(root: ParentNode, tab: Element | undefined) {
-	const diffstat = (tab?.closest('.tabnav') ?? root).querySelector('#diffstat')
+function readLines(root: ParentNode, tab: Element) {
+	const diffstat = (tab.closest('.tabnav') ?? root).querySelector('#diffstat')
 	if (diffstat) {
 		const additions = parseCount(diffstat.querySelector('.color-fg-success')?.textContent)
 		const deletions = parseCount(diffstat.querySelector('.color-fg-danger')?.textContent)
@@ -55,13 +59,15 @@ function readLines(root: ParentNode, tab: Element | undefined) {
 	return undefined
 }
 
-/** The size GitHub already shows on the page; undefined until the page has rendered it. */
+/** The size GitHub already shows for this pull request; undefined until the page has rendered it. */
 export function readPullRequestSize(
 	location: PullRequestLocation,
 	root: ParentNode = document,
 ): PullRequestSize | undefined {
 	const tab = findFilesTab(location, root)
-	const counter = tab?.querySelector(COUNTER)
+	if (!tab) return undefined
+
+	const counter = tab.querySelector(COUNTER)
 	const viewed = VIEWED_TOTAL.exec(root.querySelector(VIEWED_SUMMARY)?.textContent ?? '')?.[1]
 	const files =
 		parseCount(counter?.getAttribute('title') || counter?.textContent) ?? parseCount(viewed)
@@ -72,20 +78,29 @@ export function readPullRequestSize(
 	return lines === undefined ? { files } : { files, lines }
 }
 
-// A size the page does not show is treated as large: the click costs less than a frozen page.
+// A size the page does not show in full is treated as large: the click costs less than a frozen page.
 export const isLargePullRequest = (size: PullRequestSize | undefined) =>
-	!size || size.files > LARGE_PULL_REQUEST.files || (size.lines ?? 0) > LARGE_PULL_REQUEST.lines
+	!size ||
+	size.files > LARGE_PULL_REQUEST.files ||
+	size.lines === undefined ||
+	size.lines > LARGE_PULL_REQUEST.lines
+
+// Over the file limit the line count changes nothing; under it, the line count decides.
+const isSizeSettled = (size: PullRequestSize | undefined) =>
+	size !== undefined && (size.files > LARGE_PULL_REQUEST.files || size.lines !== undefined)
 
 export function largePullRequestText(size: PullRequestSize | undefined): string {
-	if (!size) return 'Group this pull request with detent'
-	if (size.files > LARGE_PULL_REQUEST.files)
+	if (size && size.files > LARGE_PULL_REQUEST.files)
 		return `Large pull request (${size.files.toLocaleString('en-US')} files). Group with detent`
+	if (size?.lines !== undefined && size.lines > LARGE_PULL_REQUEST.lines)
+		return `Large pull request (${size.lines.toLocaleString('en-US')} lines). Group with detent`
 
-	return `Large pull request (${(size.lines ?? 0).toLocaleString('en-US')} lines). Group with detent`
+	return 'Group this pull request with detent'
 }
 
-// The Changes page renders its counters after the script starts; the wait polls instead of
-// observing the whole document, and gives up when the reviewer has moved on.
+// The Changes page renders its counters after the script starts, the file count possibly before the
+// line count; the wait polls instead of observing the whole document, and gives up when the reviewer
+// has moved on. At the deadline it returns what it has, which counts as large when incomplete.
 export async function waitForPullRequestSize(
 	location: PullRequestLocation,
 	isActive: () => boolean,
@@ -93,7 +108,7 @@ export async function waitForPullRequestSize(
 ): Promise<PullRequestSize | undefined> {
 	const deadline = Date.now() + timeout
 	let size = readPullRequestSize(location)
-	while (!size && isActive() && Date.now() < deadline) {
+	while (!isSizeSettled(size) && isActive() && Date.now() < deadline) {
 		await new Promise((resolve) => setTimeout(resolve, SIZE_POLL_MILLISECONDS))
 		size = readPullRequestSize(location)
 	}

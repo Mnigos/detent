@@ -29,6 +29,10 @@ const CLASSIC: PullRequestLocation = {
 	tab: 'files',
 }
 const CHANGES: PullRequestLocation = { owner: 'example', repo: 'shop', number: 7, tab: 'changes' }
+const changesTab = (number = CHANGES.number) =>
+	`<nav><a href="/example/shop/pull/${number}/changes">Files changed</a></nav>`
+const linesSummary = (additions: string, deletions: string) =>
+	`<span class="sr-only">Lines changed: ${additions} additions &amp; ${deletions} deletions</span>`
 
 beforeEach(() => {
 	vi.resetAllMocks()
@@ -54,9 +58,16 @@ describe('readPullRequestSize', () => {
 	})
 
 	it('reads the file total from the viewed progress of the Changes page, not from file headers', () => {
-		document.body.innerHTML = fixture('github-changes-tree.html')
+		document.body.innerHTML = changesTab() + fixture('github-changes-tree.html')
 
 		expect(readPullRequestSize(CHANGES)).toEqual({ files: 39 })
+	})
+
+	it('ignores a tree and lines summary left by the previous pull request after a soft navigation', () => {
+		document.body.innerHTML =
+			changesTab(6) + linesSummary('100', '20') + fixture('github-changes-tree.html')
+
+		expect(readPullRequestSize(CHANGES)).toBeUndefined()
 	})
 
 	it('reads a counter on a /changes tab link and the pull request level lines summary', () => {
@@ -75,8 +86,9 @@ describe('readPullRequestSize', () => {
 
 describe('isLargePullRequest', () => {
 	it.each([
-		[{ files: LARGE_PULL_REQUEST.files }, false],
+		[{ files: LARGE_PULL_REQUEST.files, lines: 10 }, false],
 		[{ files: LARGE_PULL_REQUEST.files + 1 }, true],
+		[{ files: 1 }, true],
 		[{ files: 2, lines: LARGE_PULL_REQUEST.lines }, false],
 		[{ files: 2, lines: LARGE_PULL_REQUEST.lines + 1 }, true],
 		[undefined, true],
@@ -94,6 +106,7 @@ describe('largePullRequestText', () => {
 			'Large pull request (25,000 lines). Group with detent',
 		)
 		expect(largePullRequestText(undefined)).toBe('Group this pull request with detent')
+		expect(largePullRequestText({ files: 1 })).toBe('Group this pull request with detent')
 	})
 })
 
@@ -106,6 +119,38 @@ describe('waitForPullRequestSize', () => {
 		await vi.advanceTimersByTimeAsync(200)
 
 		await expect(waiting).resolves.toEqual({ files: 570, lines: 11_136 })
+	})
+
+	it('keeps waiting for the line count when the file count renders first', async () => {
+		vi.useFakeTimers()
+		document.body.innerHTML = changesTab() + fixture('github-changes-tree.html')
+		const waiting = waitForPullRequestSize(CHANGES, () => true)
+		await vi.advanceTimersByTimeAsync(400)
+		document.body.insertAdjacentHTML('afterbegin', linesSummary('25,001', '0'))
+		await vi.advanceTimersByTimeAsync(200)
+
+		await expect(waiting).resolves.toEqual({ files: 39, lines: 25_001 })
+	})
+
+	it('returns the file count alone at the deadline when the line count never renders', async () => {
+		vi.useFakeTimers()
+		document.body.innerHTML = changesTab() + fixture('github-changes-tree.html')
+		const waiting = waitForPullRequestSize(CHANGES, () => true, 1000)
+		await vi.advanceTimersByTimeAsync(1200)
+
+		await expect(waiting).resolves.toEqual({ files: 39 })
+	})
+
+	it('waits for the pull request tab while the previous page is still shown', async () => {
+		vi.useFakeTimers()
+		document.body.innerHTML =
+			changesTab(6) + linesSummary('100', '20') + fixture('github-changes-tree.html')
+		const waiting = waitForPullRequestSize(CHANGES, () => true)
+		await vi.advanceTimersByTimeAsync(400)
+		document.body.innerHTML = `${changesTab()}${linesSummary('900', '100')}<span class="ViewedFileProgress-module__ProgressContainer___3P2j"></span><span class="sr-only">0 of 570 files viewed</span>`
+		await vi.advanceTimersByTimeAsync(200)
+
+		await expect(waiting).resolves.toEqual({ files: 570, lines: 1000 })
 	})
 
 	it('gives up at the deadline or when the reviewer navigates away', async () => {
@@ -152,8 +197,26 @@ describe('largePullRequestGate', () => {
 	})
 
 	it('lets a small pull request start at once', async () => {
-		document.body.innerHTML = fixture('github-changes-tree.html')
+		document.body.innerHTML =
+			changesTab() + linesSummary('120', '30') + fixture('github-changes-tree.html')
 
 		expect(await largePullRequestGate(CHANGES, () => true)).toBeUndefined()
+	})
+
+	it('asks for a click when the line count of a one-file pull request never renders', async () => {
+		vi.useFakeTimers()
+		document.body.innerHTML = changesTab() + fixture('github-changes-tree.html')
+		const gate = largePullRequestGate(CHANGES, () => true)
+		await vi.advanceTimersByTimeAsync(5200)
+
+		await expect(gate).resolves.toBe('Group this pull request with detent')
+	})
+
+	it('asks for a click on a one-file pull request over the line limit', async () => {
+		document.body.innerHTML = `${changesTab()}${linesSummary('25,001', '0')}<span class="ViewedFileProgress-module__ProgressContainer___3P2j"></span><span class="sr-only">0 of 1 files viewed</span>`
+
+		expect(await largePullRequestGate(CHANGES, () => true)).toBe(
+			'Large pull request (25,001 lines). Group with detent',
+		)
 	})
 })

@@ -84,5 +84,11 @@ Read before anything heavy runs, to decide whether detent waits for a click (`sr
   `/changes` tab link and a pull request level "Lines changed: N additions & M deletions" are also read, but neither is
   verified on a real logged-in page. Every file header carries its own "Lines changed" line; those inside
   `[data-diff-header-wrapper]` are skipped.
-- When none of these appears within 5 s, the pull request counts as large.
+- The tree carries nothing that names its pull request, so nothing is read until the page has a tab link
+  `a[href="/<owner>/<repo>/pull/<n>/files"]` or `…/changes` for the pull request in the URL, with or without a
+  counter. A tree left from the previous pull request is therefore not read while its own tab bar is still shown.
+  Whether the logged-in Changes page has such a link is not verified; without one every pull request there counts
+  as large.
+- At or under 300 files the line count decides, so a file count without one keeps the wait going. When the page
+  shows no complete size within 5 s, the pull request counts as large.
 
