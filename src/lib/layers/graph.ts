@@ -27,6 +27,7 @@ const COMMENTS = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g
 const NON_CODE =
 	/\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g
 const CONTROL_WORDS = new Set(['if', 'while', 'for', 'switch', 'catch', 'with', 'constructor'])
+const MEMBER_ACCESS = /\.[\w$]+/g
 
 export function buildEdges(files: DiffFile[]): Edge[] {
 	const addedLines = new Map(
@@ -105,6 +106,11 @@ export function buildMethodEdges(files: DiffFile[]): Edge[] {
 				.split('\n'),
 		]),
 	)
+	// A call needs `.name` in the caller; testing every method against every line of every file
+	// took seconds on large pull requests, so the regex only runs where the member name occurs.
+	const members = new Map(
+		[...addedLines].map(([path, lines]) => [path, new Set(lines.join('\n').match(MEMBER_ACCESS))]),
+	)
 	const methods = new Map<string, Set<string>>()
 	const edges: Edge[] = []
 	for (const [path, lines] of addedLines) {
@@ -128,6 +134,7 @@ export function buildMethodEdges(files: DiffFile[]): Edge[] {
 		for (const [path, lines] of addedLines)
 			if (
 				path !== owner &&
+				members.get(path)?.has(`.${name}`) &&
 				lines.some(
 					(line) =>
 						!line.trimStart().startsWith('*') &&
