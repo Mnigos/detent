@@ -1,8 +1,14 @@
 import { browser } from 'wxt/browser'
 import { parsePullsListUrl } from '@/src/lib/list/rows'
-import { LOADING_TEXT, showAnalysisBadge } from '@/src/lib/panel/analysis-badge'
+import {
+	hideGroupButton,
+	LOADING_TEXT,
+	showAnalysisBadge,
+	showGroupButton,
+} from '@/src/lib/panel/analysis-badge'
 import { observeMutations } from '@/src/lib/panel/github-dom'
-import { parsePullRequestUrl } from '@/src/lib/pull-request-url'
+import { largePullRequestGate, saveGroupingConsent } from '@/src/lib/panel/large-pull-request'
+import { type PullRequestLocation, parsePullRequestUrl } from '@/src/lib/pull-request-url'
 import { readSettings } from '@/src/lib/settings'
 import { startListStats } from '@/src/list/mount'
 import { startPanel } from '@/src/panel/mount'
@@ -71,10 +77,32 @@ export default defineContentScript({
 			const current = generation
 			panel?.remove()
 			panel = undefined
+			hideGroupButton()
 			document.getElementById(FAILURE_ID)?.remove()
 			showAnalysisBadge(Boolean(view) && view !== 'list', LOADING_TEXT)
 			if (!view) return
+			if (view === 'list' || !location) return start(view, location, current)
 
+			// A large pull request waits for a click before anything heavy runs on the page.
+			const gate = await largePullRequestGate(location, () => current === generation)
+			if (current !== generation) return
+			if (!gate) return start(view, location, current)
+
+			showAnalysisBadge(false)
+			showGroupButton(gate, () => {
+				if (current !== generation) return
+
+				showAnalysisBadge(true, LOADING_TEXT)
+				void saveGroupingConsent(location)
+				void start(view, location, current)
+			})
+		}
+
+		async function start(
+			view: 'list' | 'panel' | 'tree',
+			location: PullRequestLocation | undefined,
+			current: number,
+		) {
 			try {
 				const next =
 					view === 'list'

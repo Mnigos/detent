@@ -31,3 +31,11 @@ export function parsePullRequestUrl(url: string): PullRequestLocation | undefine
 		tab: (match[4] ?? 'conversation') as PullRequestLocation['tab'],
 	}
 }
+
+/** The lowercase owner/repo/number key that detent stores per pull request state under. */
+export const pullRequestScope = ({
+	owner,
+	repo,
+	number,
+}: Pick<PullRequestLocation, 'owner' | 'repo' | 'number'>) =>
+	`${owner}/${repo}/${number}`.toLowerCase()

@@ -12,11 +12,14 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
-model of your choice names and orders the steps and ranks the files, in separate requests cached
-per pull request, model and diff revision. Without a key the steps come from the file structure and
-the priorities from a local path and size heuristic. The popup also holds two switches, one to turn
-detent off and one for the list diff sizes, and a usage counter. See `PRIVACY.md` for what leaves
-the browser and `docs/store/listing.md` for the Chrome Web Store material and release steps.
+model of your choice names and orders the steps and ranks the files, in separate requests cached per
+pull request, model and diff revision. Without a key the steps come from the file structure and the
+priorities from a local path and size heuristic. On a pull request with more than 300 changed files
+or 20,000 changed lines, detent waits until you click its corner badge before it fetches the diff,
+and remembers that click for the pull request until the browser session ends. The popup also holds
+two switches, one to turn detent off and one for the list diff sizes, and a usage counter. See
+`PRIVACY.md` for what leaves the browser and `docs/store/listing.md` for the Chrome Web Store
+material and release steps.
 
 ## Development
 

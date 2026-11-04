@@ -13,7 +13,7 @@ import { requestLayerLabels } from '../model/label-layers'
 import { createPriorityRequest, planPriorities } from '../priority/ranking'
 import { COLLAPSED_PRIORITY_SECTIONS } from '../priority/sections'
 import { PRIORITY_LINES } from '../priority/status'
-import type { PullRequestLocation } from '../pull-request-url'
+import { type PullRequestLocation, pullRequestScope } from '../pull-request-url'
 import { anchorIdForPath, fetchPullRequestBody, readPullRequestSummary } from './github-dom'
 import { STATUS_LINES, statusLineFor } from './status'
 import {
@@ -76,7 +76,7 @@ export async function createReviewSession(
 			})),
 		}))
 	const digest = await digestText(text)
-	const scope = `${location.owner}/${location.repo}/${location.number}`.toLowerCase()
+	const scope = pullRequestScope(location)
 	const key = `panel:${scope}`
 	const anchorIds = new Map(
 		await Promise.all(files.map(async ({ path }) => [path, await anchorIdForPath(path)] as const)),
