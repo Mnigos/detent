@@ -69,3 +69,20 @@ the header's `[class*="file-path-section"]` instead and the layer divider stays 
 is `auto | light | dark`; `auto` is resolved with `matchMedia('(prefers-color-scheme: dark)')`. Descendant
 selectors do not cross the shadow boundary, so the resolved mode is mirrored as a `dark` class on the
 shadow root's container and Tailwind's dark variant is redefined as `&:where(.dark, .dark *)`.
+
+## Pull request size
+
+Read before anything heavy runs, to decide whether detent waits for a click (`src/lib/panel/large-pull-request.ts`).
+
+- Classic page, observed 2026-11-04 logged out on `https://github.com/TanStack/router/pull/8658/files` (trimmed copy in
+  `fixtures/github-files-header.html`): the tab link `a[href="/<owner>/<repo>/pull/<n>/files"]` holds
+  `span#files_tab_counter.Counter[title="570"]`, and the same `.tabnav` holds `#diffstat` with `.color-fg-success`
+  (`+5,792`) and `.color-fg-danger` (`−5,344`). The link's href ties the counter to the pull request, so a counter left
+  from the previous page after a soft navigation is not read.
+- Changes page (logged in): the file tree's `ViewedFileProgress-module__ProgressContainer` is followed by
+  `.sr-only` "0 of 39 files viewed" (verified in `fixtures/github-changes-tree.html`). A counter inside a
+  `/changes` tab link and a pull request level "Lines changed: N additions & M deletions" are also read, but neither is
+  verified on a real logged-in page. Every file header carries its own "Lines changed" line; those inside
+  `[data-diff-header-wrapper]` are skipped.
+- When none of these appears within 5 s, the pull request counts as large.
+
