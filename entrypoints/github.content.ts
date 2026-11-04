@@ -8,7 +8,11 @@ import {
 } from '@/src/lib/panel/analysis-badge'
 import { observeMutations } from '@/src/lib/panel/github-dom'
 import { largePullRequestGate, saveGroupingConsent } from '@/src/lib/panel/large-pull-request'
-import { type PullRequestLocation, parsePullRequestUrl } from '@/src/lib/pull-request-url'
+import {
+	type PullRequestLocation,
+	parsePullRequestUrl,
+	pullRequestScope,
+} from '@/src/lib/pull-request-url'
 import { readSettings } from '@/src/lib/settings'
 import { startListStats } from '@/src/list/mount'
 import { startPanel } from '@/src/panel/mount'
@@ -43,8 +47,20 @@ export default defineContentScript({
 		// undefined forces the next sync() through, including to tear a view down when its key is ''.
 		let mounted: string | undefined = ''
 		let generation = 0
+		// The pull request page the button was shown for; leaving it removes the button at once.
+		let gated: PullRequestLocation | undefined
+
+		const isShown = (location: PullRequestLocation) => {
+			const now = parsePullRequestUrl(window.location.href)
+
+			return now?.tab === location.tab && pullRequestScope(now) === pullRequestScope(location)
+		}
 
 		async function sync() {
+			if (gated && !isShown(gated)) {
+				gated = undefined
+				hideGroupButton()
+			}
 			const location = parsePullRequestUrl(window.location.href)
 			const list = parsePullsListUrl(window.location.href)
 			const { isEnabled, showListStats } = await readSettings()
@@ -84,13 +100,16 @@ export default defineContentScript({
 			if (view === 'list' || !location) return start(view, location, current)
 
 			// A large pull request waits for a click before anything heavy runs on the page.
-			const gate = await largePullRequestGate(location, () => current === generation)
-			if (current !== generation) return
+			// Settings are read before the generation moves on, so the URL is checked as well.
+			const isActive = () => current === generation && isShown(location)
+			const gate = await largePullRequestGate(location, isActive)
+			if (!isActive()) return
 			if (!gate) return start(view, location, current)
 
 			showAnalysisBadge(false)
+			gated = location
 			showGroupButton(gate, () => {
-				if (current !== generation) return
+				if (!isActive()) return
 
 				showAnalysisBadge(true, LOADING_TEXT)
 				void saveGroupingConsent(location)
