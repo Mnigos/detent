@@ -50,7 +50,7 @@ function stubMergeBox(states: Record<number, string | number>) {
 	return fetch
 }
 
-const mergeBoxCalls = (fetch: ReturnType<typeof stubMergeBox>) =>
+const mergeBoxCalls = (fetch: { mock: { calls: [string, ...unknown[]][] } }) =>
 	fetch.mock.calls.map(([url]) => Number(/\/pull\/(\d+)\//.exec(url)?.[1])).sort((a, b) => a - b)
 
 let view: Awaited<ReturnType<typeof startListStats>> | undefined
@@ -123,9 +123,56 @@ describe('list merge conflicts', () => {
 		const fetch = stubMergeBox({ 1: 'CLEAN', 2: 'CLEAN' })
 		await mount()
 
-		expect(marked()).toEqual(['https://github.com/o/r/pull/1', 'https://github.com/o/r/pull/2'])
-		await vi.waitFor(() => expect(marked()).toEqual(['https://github.com/o/r/pull/1']))
+		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
+		await vi.waitFor(async () =>
+			expect((await readConflictsCache())['o/r/2']?.hasConflicts).toBe(false),
+		)
+		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
 		expect(mergeBoxCalls(fetch)).toEqual([2])
+	})
+
+	it('drops a stale conflict when GitHub now answers unknown', async () => {
+		await fakeBrowser.storage.local.set({
+			[CONFLICTS_KEY]: {
+				'o/r/1': { hasConflicts: true, at: Date.now() - CONFLICTS_TTL_MILLISECONDS },
+			},
+		})
+		renderList([{ number: 1 }])
+		const fetch = stubMergeBox({ 1: 'UNKNOWN' })
+		await mount()
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+		await new Promise((done) => setTimeout(done, 20))
+
+		expect(marked()).toEqual([])
+	})
+
+	it('drops waiting requests for rows a new filter removed', async () => {
+		renderList([1, 2, 3, 4, 5, 6].map((number) => ({ number })))
+		const pending: (() => void)[] = []
+		const fetch = vi.fn(
+			(_url: string) =>
+				new Promise<Response>((resolve) => {
+					pending.push(() =>
+						resolve(Response.json({ pullRequest: { state: 'OPEN', mergeStateStatus: 'CLEAN' } })),
+					)
+				}),
+		)
+		vi.stubGlobal('fetch', fetch)
+		await mount()
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3))
+
+		const list = document.querySelector('ul') as HTMLElement
+		const template = list.querySelector('li')?.cloneNode(true) as HTMLLIElement
+		;(template.querySelector('a[href*="/pull/"]') as HTMLAnchorElement).href =
+			'https://github.com/o/r/pull/10'
+		list.replaceChildren(template)
+		await new Promise((done) => setTimeout(done, 50))
+		for (const resolve of pending.splice(0)) resolve()
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4))
+		for (const resolve of pending.splice(0)) resolve()
+		await new Promise((done) => setTimeout(done, 20))
+
+		expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3, 10])
 	})
 
 	it('asks once more about an unknown state, then leaves the row bare', async () => {
