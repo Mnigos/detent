@@ -32,6 +32,7 @@ import { observeMutations } from '@/src/lib/panel/github-dom'
 const CONCURRENCY = 3
 // GitHub starts computing an unknown merge state on the first request; one later ask usually gets it.
 const UNKNOWN_RETRY_MILLISECONDS = 15_000
+const MAX_REFUSALS = 3
 
 type Ref = { owner: string; repo: string; number: number }
 
@@ -86,7 +87,9 @@ export async function startListStats() {
 	// Signed out GitHub serves no merge box, so a signed-out list asks for nothing.
 	let canAskConflicts = isSignedIn()
 	// Pull requests GitHub answered "unknown" for: when to ask again, forever once asked twice.
+	// Retry deadlines use the timer's monotonic clock, so a wall clock change cannot strand a row.
 	const unknownUntil = new Map<string, number>()
+	let refusals = 0
 	const statsPool = createPool(loadStats)
 	const conflictsPool = createPool(loadConflicts)
 	let isStopped = false
@@ -117,7 +120,7 @@ export async function startListStats() {
 				canAskConflicts &&
 				row.isOpen &&
 				!isConflictFresh &&
-				now >= (unknownUntil.get(key) ?? 0) &&
+				performance.now() >= (unknownUntil.get(key) ?? 0) &&
 				!conflictsPool.has(key)
 			)
 				conflictsPool.push(ref)
@@ -145,14 +148,18 @@ export async function startListStats() {
 		let state: ConflictState
 		try {
 			state = await fetchConflictState(ref)
+			refusals = 0
 		} catch (error) {
-			// One refusal means the rest are refused too (signed out in another tab, or no access).
+			// A 401, or refusals in a row, means signed out in another tab; one 403 or 404 may be a rate
+			// limit or a single pull request, so that row only waits for its retry.
 			if (error instanceof MergeBoxUnavailableError) {
-				canAskConflicts = false
-				conflictsPool.stop()
-				return
-			}
-			console.warn('[detent] merge conflicts', key, error)
+				refusals += 1
+				if (error.status === 401 || refusals >= MAX_REFUSALS) {
+					canAskConflicts = false
+					conflictsPool.stop()
+					return
+				}
+			} else console.warn('[detent] merge conflicts', key, error)
 			state = 'unknown'
 		}
 		if (state === 'unknown') {
@@ -174,7 +181,7 @@ export async function startListStats() {
 			return
 		}
 
-		unknownUntil.set(key, Date.now() + UNKNOWN_RETRY_MILLISECONDS)
+		unknownUntil.set(key, performance.now() + UNKNOWN_RETRY_MILLISECONDS)
 		const timer = setTimeout(() => {
 			timers.delete(timer)
 			if (!isStopped) apply()
