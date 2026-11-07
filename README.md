@@ -34,6 +34,8 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   for the head commit the page shows, taken from the diff detent already downloaded on Files changed
   or Changes, or downloaded once through the list queue and counted in the service worker, then
   stored for the list too. Large pull requests get them as well; the click only gates grouping.
+- **Image preview.** Clicking an image in a description or comment opens it over the page instead
+  of a new tab; arrow keys step through that comment's images. Cmd/Ctrl-click still opens the tab.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. A model provider is optional and chosen in the popup:
@@ -44,9 +46,8 @@ Without a provider the steps come from the file structure and the priorities fro
 size heuristic. On a pull request with more than 300 changed files
 or 20,000 changed lines, detent waits until you click its corner badge before it fetches the diff,
 and remembers that click for the pull request until the browser session ends. The popup also holds
-two switches, one to turn detent off and one for the list diff sizes and conflicts and the header's
-lines of code, and a usage
-counter. See
+three switches, one to turn detent off, one for the list diff sizes and conflicts and the header's
+lines of code, and one for the image preview, and a usage counter. See
 `PRIVACY.md` for what leaves the browser and `docs/store/listing.md` for the Chrome Web Store
 material and release steps.
 

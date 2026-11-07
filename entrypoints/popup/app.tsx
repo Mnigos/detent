@@ -33,6 +33,7 @@ export function App({
 	const [chatgpt, setChatgpt] = useState(initialChatgpt)
 	const [isEnabled, setIsEnabled] = useState(settings.isEnabled)
 	const [showListStats, setShowListStats] = useState(settings.showListStats)
+	const [showImagePreview, setShowImagePreview] = useState(settings.showImagePreview)
 	const isChatGpt = provider === 'chatgpt'
 
 	async function choose(next: ProviderChoice) {
@@ -50,6 +51,11 @@ export function App({
 	async function toggleListStats(next: boolean) {
 		setShowListStats(next)
 		await writeSettings({ showListStats: next })
+	}
+
+	async function toggleImagePreview(next: boolean) {
+		setShowImagePreview(next)
+		await writeSettings({ showImagePreview: next })
 	}
 
 	async function reset() {
@@ -79,6 +85,15 @@ export function App({
 					onChange={(event) => void toggleListStats(event.target.checked)}
 				/>
 				Show diff size and conflicts on pull request lists, and code lines in pull request headers
+			</label>
+			<label className="flex items-center gap-2 text-neutral-300 text-sm">
+				<input
+					type="checkbox"
+					disabled={isLoading}
+					checked={showImagePreview}
+					onChange={(event) => void toggleImagePreview(event.target.checked)}
+				/>
+				Preview images from descriptions and comments on the page
 			</label>
 			<fieldset className="flex flex-col gap-1">
 				<legend className="mb-1 text-neutral-400 text-xs">Model provider</legend>
