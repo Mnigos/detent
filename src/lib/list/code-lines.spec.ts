@@ -75,9 +75,9 @@ describe('codeLines', () => {
 		[
 			'CSS',
 			['src/styles.css', 'src/styles.scss'],
-			['+/* note */', '+.a { color: red }'],
-			{ additions: 1, deletions: 0 },
-			{ additions: 1, deletions: 0 },
+			['+/* note */', '+ */', '+.a { color: red }', '+* { box-sizing: border-box }'],
+			{ additions: 2, deletions: 0 },
+			{ additions: 2, deletions: 0 },
 		],
 		[
 			'hash',

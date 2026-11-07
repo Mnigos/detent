@@ -90,7 +90,7 @@ function settle(meta: HTMLElement) {
 
 /** Puts the stats at the end of the meta line, or updates the ones already there. */
 export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): void {
-	const text = `${key}:${stats.additions}:${stats.deletions}:${stats.files}:${stats.code.additions}:${stats.code.deletions}`
+	const text = `${key}:${stats.additions}:${stats.deletions}:${stats.files}:${stats.code.additions}:${stats.code.deletions}:${JSON.stringify(stats.excluded)}`
 	const existing = meta.querySelector<HTMLElement>(`:scope > [${STATS_ATTRIBUTE}]`)
 	if (existing?.dataset.detentDiffStats === text) {
 		settle(meta)
