@@ -92,3 +92,30 @@ Read before anything heavy runs, to decide whether detent waits for a click (`sr
 - At or under 300 files the line count decides, so a file count without one keeps the wait going. When the page
   shows no complete size within 5 s, the pull request counts as large.
 
+
+## Merge conflicts on pull request lists
+
+Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack/router`, where the REST API reported
+#8842 and #8829 as `mergeable: false, mergeable_state: "dirty"`.
+
+- Source: `GET https://github.com/<owner>/<repo>/pull/<n>/page_data/merge_box`, the JSON GitHub's React merge box
+  loads (route name `mergeBox: "merge_box"` in the PR page bundle; GitHub adds `?merge_method=…&bypass_requirements=…`,
+  detent omits them). The bundle reads `pullRequest.state`, `pullRequest.mergeStateStatus` (GraphQL
+  `MergeStateStatus`: `DIRTY` is a conflict, `UNKNOWN` still computing), `pullRequest.headRefOid`/`baseRefName`, and
+  `mergeRequirements.conditions[]` with `type: "PULL_REQUEST_MERGE_CONFLICT_STATE"` and `result: "FAILED"` for a
+  conflict. detent marks a row on `DIRTY` or that failed condition. The response shape comes from reading the
+  bundle; the endpoint answers `404 {"error":"Not Found"}` to a signed-out visitor, so it is not yet checked against a
+  real signed-in answer.
+- Signed out: the PR page renders no merge box ("Sign up for free to join this conversation"), the embedded React
+  data carries only live-update channel names (`mergeboxChannels`, `gitMergeStateChannel`), the hovercard
+  (`/pull/<n>/hovercard`, 5 KB) and the list page's own payload say nothing about conflicts, and `merge_box`,
+  `merge_request_status`, `status_checks` under `page_data/` all answer 404. Other `page_data/` routes do answer
+  signed out (`diffstat` 74 B, `tab_counts`, `timeline`, `description`, `labels`). `meta[name="user-login"]` is empty
+  for a signed-out visitor, which is how detent skips the requests.
+- Not used: `api.github.com/repos/<o>/<r>/pulls/<n>` has `mergeable`/`mergeable_state` and sends
+  `Access-Control-Allow-Origin: *`, but without a token it allows 60 requests an hour per IP (two list pages),
+  answers 404 for a private repository because it does not take the github.com session, and returns
+  `mergeable: null` until GitHub has computed it.
+- The list row's state icon is the leading `svg.octicon`: `octicon-git-pull-request` (aria-label "Open pull
+  request"), `octicon-git-pull-request-draft` ("Draft pull request"), `-closed`, or `octicon-git-merge`. Only the first
+  two are asked about.

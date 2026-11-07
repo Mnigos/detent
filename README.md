@@ -12,8 +12,10 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   again. The choice holds across pull requests and tabs.
 - **Priority Review.** A third mode in the Changes page file tree (Layers | Priority | Files) ranks
   the files into Urgent (at most 10), High, Medium and Low.
-- **Diff size on pull request lists.** Each row of `/<owner>/<repo>/pulls` shows
-  `+additions −deletions · N files`, counted from the pull request's diff and cached for 10 minutes.
+- **Diff size and conflicts on pull request lists.** Each row of `/<owner>/<repo>/pulls` shows
+  `+additions −deletions · N files`, counted from the pull request's diff and cached for 10 minutes,
+  and, when you are signed in, a red `Conflicts` marker on an open pull request whose branch
+  conflicts with its base, read from GitHub's merge box and cached for 5 minutes.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
@@ -22,7 +24,8 @@ pull request, model and diff revision. Without a key the steps come from the fil
 priorities from a local path and size heuristic. On a pull request with more than 300 changed files
 or 20,000 changed lines, detent waits until you click its corner badge before it fetches the diff,
 and remembers that click for the pull request until the browser session ends. The popup also holds
-two switches, one to turn detent off and one for the list diff sizes, and a usage counter. See
+two switches, one to turn detent off and one for the list diff sizes and conflicts, and a usage
+counter. See
 `PRIVACY.md` for what leaves the browser and `docs/store/listing.md` for the Chrome Web Store
 material and release steps.
 
