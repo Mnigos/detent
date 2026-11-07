@@ -36,6 +36,8 @@ function excludedFileKind(path: string): ExcludedKind | undefined {
 
 // Comment-only lines by their first characters; a line that only closes a comment counts too.
 const C_LIKE = /^(\/\/|\/\*|\*\/|\*(\s|$))/
+// A line opening with "* " is a selector in a stylesheet (`* { … }`), not a comment continuation.
+const STYLESHEET = /^(\/\/|\/\*|\*\/)/
 const HASH = /^#/
 const DASHES = /^--/
 const MARKUP = /^(<!--|-->)/
@@ -45,8 +47,9 @@ const COMMENT_BY_EXTENSION: Record<string, RegExp> = {}
 for (const [pattern, extensions] of [
 	[
 		C_LIKE,
-		'js jsx mjs cjs ts tsx mts cts rs go c h cc cpp cxx hpp cs java kt kts swift scala dart groovy gradle php css scss less',
+		'js jsx mjs cjs ts tsx mts cts rs go c h cc cpp cxx hpp cs java kt kts swift scala dart groovy gradle php',
 	],
+	[STYLESHEET, 'css scss less'],
 	[HASH, 'py rb sh bash zsh fish yml yaml toml'],
 	[DASHES, 'sql lua'],
 	[MARKUP, 'html htm xml svg'],
