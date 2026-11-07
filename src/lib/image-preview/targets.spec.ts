@@ -76,10 +76,11 @@ describe('previewTarget', () => {
 			<a href="https://example.com"><img id="logo" src="https://example.com/logo.png"></a>
 			<a href="https://raw.githubusercontent.com/example/shop/main/README.md"><img id="readme" src="https://raw.githubusercontent.com/example/shop/main/logo.png"></a>
 			<a href="https://example.com/large.png"><img id="thumbnail" src="https://example.com/small.png"></a>
+			<a href="https://example.com/image.php?id=2"><img id="query" src="https://camo.githubusercontent.com/q" data-canonical-src="https://example.com/image.php?id=1"></a>
 			<a href="https://github.com/user-attachments/assets/ffffffff-0000-4000-8000-000000000000"><img id="other" src="${UPLOAD}"></a>
 		</div>`
 
-		for (const id of ['badge', 'logo', 'readme', 'thumbnail', 'other'])
+		for (const id of ['badge', 'logo', 'readme', 'thumbnail', 'query', 'other'])
 			expect(clickOn(image(`#${id}`)), id).toBeUndefined()
 	})
 
