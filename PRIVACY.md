@@ -15,8 +15,9 @@ published in the Chrome Web Store and to builds from this repository.
   review steps and the structural priorities from them.
 - **Diff sizes on pull request lists.** On a repository's pull request list
   (`github.com/<owner>/<repo>/pulls`), the extension downloads the diff of each listed pull request
-  the same way, three at a time, and counts its added and deleted lines and its files. Only these
-  three numbers are kept; the diff text is discarded. Nothing from the list goes to OpenRouter.
+  the same way, three at a time, and counts its added and deleted lines, its files, and how many of
+  those lines are code rather than tests, docs, lockfiles, generated files, blank and comment lines
+  or whitespace-only changes. Only these counts are kept; the diff text is discarded. Nothing from the list goes to OpenRouter.
 - **Merge conflicts on pull request lists.** On the same lists, when you are signed in to GitHub, the
   extension asks `github.com` for the merge box state of each open or draft pull request, three at a
   time, with your GitHub session, the request GitHub's own pull request page makes for its merge
@@ -46,7 +47,7 @@ Everything the extension stores stays in your browser's extension storage:
 - cached Priority Review rankings, per pull request, model and diff revision (the last five
   revisions of each pull request),
 - diff sizes for pull request lists: owner, repository, pull request number, additions, deletions,
-  file count and the time they were counted, reused for 10 minutes and capped at 500 pull requests,
+  file count, the code line counts with what each excluded kind took, and the time they were counted, reused for 10 minutes and capped at 500 pull requests,
 - merge conflict states for pull request lists: owner, repository, pull request number, whether it
   has conflicts and when that was read, reused for 5 minutes and capped at 500 pull requests,
 - a local counter of the tokens and cost your requests to OpenRouter reported.
