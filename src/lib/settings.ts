@@ -8,7 +8,7 @@ export interface Settings {
 	model: string
 	/** Off keeps GitHub's pages untouched: no layers, no requests. */
 	isEnabled: boolean
-	/** Diff size (+additions −deletions · files) on each row of a pull request list. */
+	/** Diff size (+additions −deletions · files) and merge conflicts on each row of a pull request list. */
 	showListStats: boolean
 }
 

@@ -1,6 +1,8 @@
 import { type DiffStats, formatCount, formatFiles } from './stats'
 
 export const STATS_ATTRIBUTE = 'data-detent-diff-stats'
+export const CONFLICTS_ATTRIBUTE = 'data-detent-conflicts'
+export const CONFLICTS_TITLE = 'This branch has conflicts with the base branch'
 
 export interface PullsListLocation {
 	owner: string
@@ -11,6 +13,8 @@ export interface PullRow {
 	owner: string
 	repo: string
 	number: number
+	/** Open or draft; a closed or merged pull request cannot gain conflicts. */
+	isOpen: boolean
 	/** The row's meta line: "#1277 · author opened … · checks". */
 	meta: HTMLElement
 }
@@ -40,6 +44,10 @@ function metaLine(row: Element): HTMLElement | null {
 	return row.querySelector<HTMLElement>('[class*="Description-module__container"]')
 }
 
+// The leading state icon: git-pull-request (open), -draft, -closed, or git-merge.
+const isOpenRow = (row: Element) =>
+	Boolean(row.querySelector('svg.octicon-git-pull-request, svg.octicon-git-pull-request-draft'))
+
 export function findPullRows(root: ParentNode = document): PullRow[] {
 	const rows: PullRow[] = []
 	for (const link of root.querySelectorAll<HTMLAnchorElement>('li a[href*="/pull/"]')) {
@@ -50,10 +58,11 @@ export function findPullRows(root: ParentNode = document): PullRow[] {
 			continue
 		}
 		const [, owner, repo, number] = PULL_PATH.exec(pathname) ?? []
-		const meta = owner && repo && number ? metaLine(link.closest('li') as Element) : null
-		if (!meta || !owner || !repo || rows.some((row) => row.meta === meta)) continue
+		const item = link.closest('li') as Element
+		const meta = owner && repo && number ? metaLine(item) : null
+		if (!meta || !owner || !repo || rows.some((pull) => pull.meta === meta)) continue
 
-		rows.push({ owner, repo, number: Number(number), meta })
+		rows.push({ owner, repo, number: Number(number), isOpen: isOpenRow(item), meta })
 	}
 
 	return rows
@@ -67,13 +76,24 @@ const span = (text: string, className = '') => {
 	return element
 }
 
+// detent's elements trail the meta line in this order, behind the checks badge GitHub adds once it
+// loads, so every row reads alike.
+const TRAILING = [STATS_ATTRIBUTE, CONFLICTS_ATTRIBUTE]
+
+function settle(meta: HTMLElement) {
+	const trailing = TRAILING.flatMap(
+		(attribute) => meta.querySelector<HTMLElement>(`:scope > [${attribute}]`) ?? [],
+	)
+	const tail = [...meta.children].slice(-trailing.length)
+	if (trailing.some((element, index) => tail[index] !== element)) meta.append(...trailing)
+}
+
 /** Puts the stats at the end of the meta line, or updates the ones already there. */
 export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): void {
 	const text = `${key}:${stats.additions}:${stats.deletions}:${stats.files}`
 	const existing = meta.querySelector<HTMLElement>(`:scope > [${STATS_ATTRIBUTE}]`)
-	// GitHub adds the checks badge once it loads; the stats move behind it so every row reads alike.
 	if (existing?.dataset.detentDiffStats === text) {
-		if (existing !== meta.lastElementChild) meta.append(existing)
+		settle(meta)
 		return
 	}
 
@@ -91,12 +111,36 @@ export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): v
 	element.children[3]?.setAttribute('aria-hidden', 'true')
 	if (existing) existing.replaceWith(element)
 	else meta.append(element)
+	settle(meta)
+}
+
+/** Marks a row whose branch conflicts with its base; there is no marker for a clean one. */
+export function renderConflicts(meta: HTMLElement): void {
+	const existing = meta.querySelector<HTMLElement>(`:scope > [${CONFLICTS_ATTRIBUTE}]`)
+	if (existing) {
+		settle(meta)
+		return
+	}
+
+	const element = document.createElement('span')
+	element.setAttribute(CONFLICTS_ATTRIBUTE, '')
+	element.title = CONFLICTS_TITLE
+	element.style.cssText = 'display:inline-flex;gap:4px;margin-left:4px;white-space:nowrap'
+	element.append(span('·'), span('Conflicts', 'fgColor-danger'))
+	element.firstElementChild?.setAttribute('aria-hidden', 'true')
+	meta.append(element)
+	settle(meta)
 }
 
 export function clearStats(meta: HTMLElement): void {
 	meta.querySelector(`:scope > [${STATS_ATTRIBUTE}]`)?.remove()
 }
 
+export function clearConflicts(meta: HTMLElement): void {
+	meta.querySelector(`:scope > [${CONFLICTS_ATTRIBUTE}]`)?.remove()
+}
+
 export function clearAllStats(root: ParentNode = document): void {
-	for (const element of root.querySelectorAll(`[${STATS_ATTRIBUTE}]`)) element.remove()
+	for (const element of root.querySelectorAll(`[${STATS_ATTRIBUTE}], [${CONFLICTS_ATTRIBUTE}]`))
+		element.remove()
 }
