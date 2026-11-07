@@ -107,8 +107,26 @@ describe('list merge conflicts', () => {
 		await mount()
 		await new Promise((done) => setTimeout(done, 50))
 
-		expect(fetch.mock.calls.length).toBeLessThanOrEqual(3)
+		expect(fetch.mock.calls.length).toBeLessThanOrEqual(5)
 		expect(marked()).toEqual([])
+	})
+
+	it('keeps asking about the other rows after one refusal', async () => {
+		renderList([{ number: 1 }, { number: 2 }])
+		const fetch = stubMergeBox({ 1: 403, 2: 'DIRTY' })
+		await mount()
+
+		await vi.waitFor(() => expect(marked()).toEqual(['https://github.com/o/r/pull/2']))
+		expect(mergeBoxCalls(fetch)).toEqual([1, 2])
+	})
+
+	it('stops at once on a 401', async () => {
+		renderList([1, 2, 3, 4, 5].map((number) => ({ number })))
+		const fetch = stubMergeBox(Object.fromEntries([1, 2, 3, 4, 5].map((n) => [n, 401])))
+		await mount()
+		await new Promise((done) => setTimeout(done, 50))
+
+		expect(fetch.mock.calls.length).toBeLessThanOrEqual(3)
 	})
 
 	it('reuses a state for five minutes and asks again after', async () => {
@@ -176,7 +194,7 @@ describe('list merge conflicts', () => {
 	})
 
 	it('asks once more about an unknown state, then leaves the row bare', async () => {
-		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
 		try {
 			renderList([{ number: 1 }])
 			const fetch = stubMergeBox({ 1: 'UNKNOWN' })
