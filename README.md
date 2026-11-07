@@ -8,8 +8,10 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
 - **Priority Review.** A third mode in the Changes page file tree (Layers | Priority | Files) ranks
   the files into Urgent (at most 10), High, Medium and Low.
 - **Diff size and conflicts on pull request lists.** Each row of `/<owner>/<repo>/pulls` shows
-  `+additions −deletions · N files`, counted from the pull request's diff and cached for 10 minutes,
-  and, when you are signed in, a red `Conflicts` marker on an open pull request whose branch
+  `+additions −deletions · N files`, counted from the pull request's diff and cached for 10 minutes.
+  When tests, docs, lockfiles, generated files, blank and comment lines or whitespace-only changes
+  account for part of it, `· code +a −d` follows with the rest; its tooltip lists what was left out.
+  When you are signed in, a red `Conflicts` marker shows on an open pull request whose branch
   conflicts with its base, read from GitHub's merge box and cached for 5 minutes.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and

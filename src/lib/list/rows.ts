@@ -1,4 +1,4 @@
-import { type DiffStats, formatCount, formatFiles } from './stats'
+import { codeTooltip, type DiffStats, formatCount, formatFiles, hasExcludedLines } from './stats'
 
 export const STATS_ATTRIBUTE = 'data-detent-diff-stats'
 export const CONFLICTS_ATTRIBUTE = 'data-detent-conflicts'
@@ -90,7 +90,7 @@ function settle(meta: HTMLElement) {
 
 /** Puts the stats at the end of the meta line, or updates the ones already there. */
 export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): void {
-	const text = `${key}:${stats.additions}:${stats.deletions}:${stats.files}`
+	const text = `${key}:${stats.additions}:${stats.deletions}:${stats.files}:${stats.code.additions}:${stats.code.deletions}:${JSON.stringify(stats.excluded)}`
 	const existing = meta.querySelector<HTMLElement>(`:scope > [${STATS_ATTRIBUTE}]`)
 	if (existing?.dataset.detentDiffStats === text) {
 		settle(meta)
@@ -109,6 +109,7 @@ export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): v
 	)
 	element.firstElementChild?.setAttribute('aria-hidden', 'true')
 	element.children[3]?.setAttribute('aria-hidden', 'true')
+	if (hasExcludedLines(stats)) element.append(...codePart(stats))
 	if (existing) existing.replaceWith(element)
 	else meta.append(element)
 	settle(meta)
@@ -130,6 +131,22 @@ export function renderConflicts(meta: HTMLElement): void {
 	element.firstElementChild?.setAttribute('aria-hidden', 'true')
 	meta.append(element)
 	settle(meta)
+}
+
+// What the pull request changes in code, next to the totals; its title says what was left out.
+function codePart(stats: DiffStats): HTMLElement[] {
+	const code = span('')
+	code.title = codeTooltip(stats)
+	code.style.cssText = 'display:inline-flex;gap:4px;font-weight:600'
+	code.append(
+		span('code'),
+		span(`+${formatCount(stats.code.additions)}`, 'fgColor-success'),
+		span(`−${formatCount(stats.code.deletions)}`, 'fgColor-danger'),
+	)
+	const separator = span('·')
+	separator.setAttribute('aria-hidden', 'true')
+
+	return [separator, code]
 }
 
 export function clearStats(meta: HTMLElement): void {
