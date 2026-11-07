@@ -16,11 +16,12 @@ published in the Chrome Web Store and to builds from this repository.
 - **Diff sizes on pull request lists.** On a repository's pull request list
   (`github.com/<owner>/<repo>/pulls`), the extension downloads the diff of each listed pull request
   on screen or one screen below the same way, three at a time across all tabs, and counts its added
-  and deleted lines and its files. Only these three numbers are kept, with the head commit the list
-  showed; the diff text is discarded. The head commits come from the data GitHub puts in the list
-  page; after GitHub switches the list to another filter or page without reloading it, the
-  extension asks `github.com` once for that page's list data, as GitHub's own list does. Nothing
-  from the list goes to OpenRouter.
+  and deleted lines, its files, and how many of those lines are code rather than tests, docs,
+  lockfiles, generated files, blank and comment lines or whitespace-only changes. Only these counts
+  are kept, with the head commit the list showed; the diff text is discarded. The head commits come
+  from the data GitHub puts in the list page; after GitHub switches the list to another filter or
+  page without reloading it, the extension asks `github.com` once for that page's list data, as
+  GitHub's own list does. Nothing from the list goes to OpenRouter.
 - **Merge conflicts on pull request lists.** On the same lists, when you are signed in to GitHub, the
   extension asks `github.com` for the merge box state of each open pull request (not drafts) on
   screen or one screen below, in the same queue, with your GitHub session, the request GitHub's own
@@ -52,9 +53,10 @@ Everything the extension stores stays in your browser's extension storage:
   revisions of each pull request),
 - whether the Hide tests switch is on,
 - diff sizes for pull request lists: owner, repository, pull request number, additions, deletions,
-  file count, the head commit they were counted for and the time they were counted, reused while
-  the list shows that commit for up to 7 days (10 minutes when the list does not say which commit
-  it shows) and capped at 500 pull requests,
+  file count, the code line counts with what each excluded kind took, the head commit they were
+  counted for and the time they were counted, reused while the list shows that commit for up to 7
+  days (10 minutes when the list does not say which commit it shows) and capped at 500 pull
+  requests,
 - merge conflict states for pull request lists: owner, repository, pull request number, whether it
   has conflicts or cannot be rebased, the head commit and when that was read, reused for 10
   minutes unless the list shows a newer commit, and capped at 500 pull requests,
