@@ -9,6 +9,8 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   the files into Urgent (at most 10), High, Medium and Low.
 - **Diff size on pull request lists.** Each row of `/<owner>/<repo>/pulls` shows
   `+additions −deletions · N files`, counted from the pull request's diff and cached for 10 minutes.
+- **Image preview.** Clicking an image in a description or comment opens it over the page instead
+  of a new tab; arrow keys step through that comment's images. Cmd/Ctrl-click still opens the tab.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
@@ -17,7 +19,8 @@ pull request, model and diff revision. Without a key the steps come from the fil
 priorities from a local path and size heuristic. On a pull request with more than 300 changed files
 or 20,000 changed lines, detent waits until you click its corner badge before it fetches the diff,
 and remembers that click for the pull request until the browser session ends. The popup also holds
-two switches, one to turn detent off and one for the list diff sizes, and a usage counter. See
+three switches, one to turn detent off, one for the list diff sizes and one for the image preview,
+and a usage counter. See
 `PRIVACY.md` for what leaves the browser and `docs/store/listing.md` for the Chrome Web Store
 material and release steps.
 
