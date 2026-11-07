@@ -33,14 +33,28 @@ export const ROLE_LAYER_NAMES: Record<FileRole, string> = {
 	test: 'Tests',
 }
 
-const LOCKFILES = [
+const LOCKFILES = new Set([
 	'bun.lock',
 	'bun.lockb',
 	'package-lock.json',
+	'npm-shrinkwrap.json',
 	'pnpm-lock.yaml',
 	'yarn.lock',
 	'Cargo.lock',
-]
+	'Gemfile.lock',
+	'composer.lock',
+	'poetry.lock',
+	'uv.lock',
+	'Pipfile.lock',
+	'go.sum',
+	'flake.lock',
+	'Podfile.lock',
+	'pubspec.lock',
+	'mix.lock',
+	'deno.lock',
+])
+
+export const isLockfile = (path: string) => LOCKFILES.has(path.split('/').at(-1) ?? '')
 
 const RULES: [FileRole, RegExp][] = [
 	['generated', /\.snap$|\.gen\.|\.generated\.|\/dist\/|\/build\/|\/migrations\/meta\/|\.min\./],
@@ -73,7 +87,7 @@ const RULES: [FileRole, RegExp][] = [
 
 export function classifyRole(path: string): FileRole {
 	const normalized = `/${path}`
-	if (LOCKFILES.includes(path.split('/').at(-1) ?? '')) return 'generated'
+	if (isLockfile(path)) return 'generated'
 
 	for (const [role, pattern] of RULES) if (pattern.test(normalized)) return role
 

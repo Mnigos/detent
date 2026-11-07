@@ -7,8 +7,10 @@ import {
 	isConflictFresh,
 	isFresh,
 	isStatsFresh,
+	LEGACY_STATS_KEYS,
 	readConflictsCache,
 	readStatsCache,
+	removeLegacyStatsCaches,
 	STATS_HEAD_TTL_MILLISECONDS,
 	STATS_KEY,
 	STATS_TTL_MILLISECONDS,
@@ -21,7 +23,14 @@ beforeEach(() => {
 	fakeBrowser.reset()
 })
 
-const entry = (at: number) => ({ additions: 1, deletions: 2, files: 3, at })
+const entry = (at: number) => ({
+	additions: 1,
+	deletions: 2,
+	files: 3,
+	code: { additions: 1, deletions: 1 },
+	excluded: { blank: { additions: 0, deletions: 1 } },
+	at,
+})
 
 describe('isFresh', () => {
 	it('is fresh for ten minutes and stale after', () => {
@@ -137,5 +146,34 @@ describe('storage', () => {
 		})
 
 		await expect(readConflictsCache()).resolves.toEqual({})
+	})
+})
+
+describe('version', () => {
+	it('keeps the counts under a key of their own shape and drops entries without code counts', async () => {
+		expect(STATS_KEY).toBe('diffStats:v2')
+		expect(LEGACY_STATS_KEYS).toEqual(['diffStats'])
+
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: {
+				'o/r/1': entry(1),
+				'o/r/2': { additions: 1, deletions: 2, files: 3, at: 2 },
+				'o/r/3': { additions: 1, deletions: 2, files: 3, at: 3, headSha: SHA_A },
+			},
+		})
+
+		await expect(readStatsCache()).resolves.toEqual({ 'o/r/1': entry(1) })
+	})
+
+	it('removes the caches of older versions', async () => {
+		await fakeBrowser.storage.local.set({
+			diffStats: { 'o/r/1': { additions: 1, deletions: 2, files: 3, at: 1, headSha: SHA_A } },
+			[STATS_KEY]: { 'o/r/1': entry(1) },
+		})
+		await removeLegacyStatsCaches()
+
+		await expect(fakeBrowser.storage.local.get(null)).resolves.toEqual({
+			[STATS_KEY]: { 'o/r/1': entry(1) },
+		})
 	})
 })

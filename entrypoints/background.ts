@@ -6,6 +6,7 @@ import {
 	fetchPullRequestDiff,
 	PullRequestDiffError,
 } from '@/src/lib/diff/fetch-diff'
+import { removeLegacyStatsCaches } from '@/src/lib/list/cache'
 import {
 	FETCH_CONFLICTS_MESSAGE,
 	type FetchConflictsRequest,
@@ -38,6 +39,10 @@ export default defineBackground(() => {
 	browser.storage.session
 		.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' })
 		.catch((error: unknown) => console.warn('[detent]', error))
+
+	browser.runtime.onInstalled.addListener(() => {
+		removeLegacyStatsCaches().catch((error: unknown) => console.warn('[detent]', error))
+	})
 
 	// One queue for the list requests of every tab; the pull request page's own diff does not wait behind them.
 	const list = createListRequests()
