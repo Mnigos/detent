@@ -3,7 +3,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { previewTarget } from './targets'
 
-const UPLOAD = 'https://private-user-images.githubusercontent.com/1/2.png?jwt=signed-for-src'
+const ID = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d'
+const UPLOAD = `https://private-user-images.githubusercontent.com/1/2-${ID}.png?jwt=signed-for-src`
 
 function clickOn(element: Element, init: MouseEventInit = {}) {
 	let target: ReturnType<typeof previewTarget>
@@ -37,12 +38,12 @@ describe('previewTarget', () => {
 		})
 	})
 
-	it('opens an upload whose link carries a different signature or the attachment address', () => {
+	it('opens an upload whose link carries another signature, its attachment or the blob page', () => {
 		document.body.innerHTML = `<div class="markdown-body">
-			<a href="https://private-user-images.githubusercontent.com/1/2.png?jwt=signed-for-link"><img id="signed" src="${UPLOAD}"></a>
-			<a href="https://github.com/user-attachments/assets/0b1c"><img id="attachment" src="${UPLOAD}"></a>
-			<a href="https://camo.githubusercontent.com/ab/cd"><img id="camo" src="https://camo.githubusercontent.com/ab/cd?x=1"></a>
-			<a href="https://example.com/shots/diagram.PNG"><img id="file" src="https://camo.githubusercontent.com/ef"></a>
+			<a href="https://private-user-images.githubusercontent.com/1/2-${ID}.png?jwt=signed-for-link"><img id="signed" src="${UPLOAD}"></a>
+			<a href="https://github.com/user-attachments/assets/${ID}"><img id="attachment" src="${UPLOAD}"></a>
+			<a href="https://camo.githubusercontent.com/ab/cd"><img id="camo" src="https://camo.githubusercontent.com/ab/cd"></a>
+			<a href="/example/shop/blob/main/docs/flow.png"><img id="file" src="/example/shop/raw/main/docs/flow.png"></a>
 		</div>`
 
 		for (const id of ['signed', 'attachment', 'camo', 'file'])
@@ -53,12 +54,12 @@ describe('previewTarget', () => {
 				'file',
 			])
 		expect(clickOn(image('#attachment'))?.images[1]?.original).toBe(
-			'https://github.com/user-attachments/assets/0b1c',
+			`https://github.com/user-attachments/assets/${ID}`,
 		)
 	})
 
 	it('matches the link against the canonical address of a proxied image', () => {
-		document.body.innerHTML = `<div class="markdown-body"><a href="https://example.com/chart"><img src="https://camo.githubusercontent.com/1" data-canonical-src="https://example.com/chart"></a></div>`
+		document.body.innerHTML = `<div class="markdown-body"><a href="https://example.com/chart.png"><img src="https://camo.githubusercontent.com/1" data-canonical-src="https://example.com/chart.png"></a></div>`
 
 		expect(clickOn(image())?.index).toBe(0)
 	})
@@ -69,14 +70,17 @@ describe('previewTarget', () => {
 		expect(clickOn(image())?.images).toHaveLength(1)
 	})
 
-	it('leaves badges and logos that link to another site to GitHub', () => {
+	it('leaves images that link to another site, file, image or attachment to GitHub', () => {
 		document.body.innerHTML = `<div class="markdown-body">
 			<a href="https://github.com/example/shop/actions"><img id="badge" src="https://camo.githubusercontent.com/badge"></a>
 			<a href="https://example.com"><img id="logo" src="https://example.com/logo.png"></a>
+			<a href="https://raw.githubusercontent.com/example/shop/main/README.md"><img id="readme" src="https://raw.githubusercontent.com/example/shop/main/logo.png"></a>
+			<a href="https://example.com/large.png"><img id="thumbnail" src="https://example.com/small.png"></a>
+			<a href="https://github.com/user-attachments/assets/ffffffff-0000-4000-8000-000000000000"><img id="other" src="${UPLOAD}"></a>
 		</div>`
 
-		expect(clickOn(image('#badge'))).toBeUndefined()
-		expect(clickOn(image('#logo'))).toBeUndefined()
+		for (const id of ['badge', 'logo', 'readme', 'thumbnail', 'other'])
+			expect(clickOn(image(`#${id}`)), id).toBeUndefined()
 	})
 
 	it.each([
