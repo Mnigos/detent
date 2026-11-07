@@ -119,10 +119,14 @@ const checks = {
 	'signed out asks for no merge box': signedOut.asked.length === 0,
 	'signed out shows no marker': signedOut.marked.length === 0,
 	'signed out still shows diff stats': signedOut.rows.some((row) => row.stats),
-	// The run ends before the 15 s retry of an unknown state, so every open row is asked exactly once.
-	'signed in asks once per open row':
-		signedIn.asked.length === openRows.length &&
-		openRows.every((row) => signedIn.asked.filter((number) => number === row.number).length === 1),
+	// One request per open row; an unknown row may get its single retry 15 s later, if the run lasted that long.
+	'signed in asks once per open row, unknown ones at most twice': openRows.every((row) => {
+		const count = signedIn.asked.filter((number) => number === row.number).length
+		return count === 1 || (count === 2 && UNKNOWN.includes(row.number))
+	}),
+	'signed in asks only about open rows': signedIn.asked.every((number) =>
+		openRows.some((row) => row.number === number),
+	),
 	'signed in marks exactly the conflicting rows': (() => {
 		const expected = CONFLICTS.filter((number) => listed.includes(number))
 		return expected.length > 0 && JSON.stringify(signedIn.marked) === JSON.stringify(expected)
