@@ -17,6 +17,8 @@ export interface Settings {
 	isEnabled: boolean
 	/** Diff size (+additions −deletions · files) and merge conflicts on each row of a pull request list. */
 	showListStats: boolean
+	/** Clicking an image in a description or comment opens it over the page, not in a new tab. */
+	showImagePreview: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -26,6 +28,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	chatgptModel: '',
 	isEnabled: true,
 	showListStats: true,
+	showImagePreview: true,
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string'
@@ -43,6 +46,7 @@ export async function readSettings(): Promise<Settings> {
 		chatgptModel: isText(stored?.chatgptModel) ? stored.chatgptModel.trim() : '',
 		isEnabled: stored?.isEnabled !== false,
 		showListStats: stored?.showListStats !== false,
+		showImagePreview: stored?.showImagePreview !== false,
 	}
 }
 

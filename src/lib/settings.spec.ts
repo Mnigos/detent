@@ -15,6 +15,7 @@ describe('readSettings', () => {
 			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		})
 	})
 
@@ -30,6 +31,7 @@ describe('readSettings', () => {
 			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		})
 	})
 
@@ -43,6 +45,7 @@ describe('readSettings', () => {
 			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		})
 	})
 
@@ -56,6 +59,12 @@ describe('readSettings', () => {
 		expect((await readSettings()).showListStats).toBe(true)
 		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { showListStats: false } })
 		expect((await readSettings()).showListStats).toBe(false)
+	})
+
+	it('previews images unless the stored flag says false', async () => {
+		expect((await readSettings()).showImagePreview).toBe(true)
+		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { showImagePreview: false } })
+		expect((await readSettings()).showImagePreview).toBe(false)
 	})
 })
 
@@ -90,6 +99,7 @@ describe('writeSettings', () => {
 			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		}
 		await expect(writeSettings({ model: 'anthropic/claude-sonnet-5' })).resolves.toEqual(expected)
 		await expect(fakeBrowser.storage.local.get(SETTINGS_KEY)).resolves.toEqual({

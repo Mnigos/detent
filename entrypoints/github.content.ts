@@ -1,5 +1,7 @@
 import { browser } from 'wxt/browser'
 import { startHeaderStats } from '@/src/header/mount'
+import { startImagePreview } from '@/src/image-preview/mount'
+import { closeImagePreview } from '@/src/image-preview/overlay'
 import { parsePullsListUrl } from '@/src/lib/list/rows'
 import {
 	hideGroupButton,
@@ -53,6 +55,8 @@ export default defineContentScript({
 		let gated: PullRequestLocation | undefined
 		// Only the document's first pass can see a hash that a reload or a history step brought back.
 		let isFirstPass = true
+		// Read with the other settings on every sync; a click has to decide before any await.
+		let previewsImages = false
 
 		// The header's code lines live per pull request, across its tabs, beside whichever view the tab has.
 		let header: { mount: () => void; remove: () => void } | undefined
@@ -99,8 +103,10 @@ export default defineContentScript({
 			const location = parsePullRequestUrl(window.location.href)
 			const list = parsePullsListUrl(window.location.href)
 			const settings = await readSettings()
-			const { isEnabled, showListStats } = settings
+			const { isEnabled, showListStats, showImagePreview } = settings
 			void syncHeader(settings)
+			previewsImages = isEnabled && showImagePreview
+			if (!previewsImages) closeImagePreview()
 			const view = !isEnabled
 				? undefined
 				: location?.tab === 'files'
@@ -184,6 +190,7 @@ export default defineContentScript({
 			}
 		}
 
+		startImagePreview(() => previewsImages)
 		void sync()
 		// Switching the extension off or on in the popup applies to open pages at once.
 		browser.storage.onChanged.addListener((changes, area) => {

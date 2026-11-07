@@ -27,6 +27,7 @@ const SETTINGS: Settings = {
 	model: 'model',
 	isEnabled: true,
 	showListStats: true,
+	showImagePreview: true,
 }
 const groupButton = () => document.querySelector<HTMLButtonElement>('#detent-group')
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))

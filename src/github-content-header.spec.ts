@@ -29,6 +29,7 @@ const SETTINGS: Settings = {
 	model: 'model',
 	isEnabled: true,
 	showListStats: true,
+	showImagePreview: true,
 }
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
