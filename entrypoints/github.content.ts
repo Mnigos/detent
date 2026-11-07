@@ -196,7 +196,11 @@ export default defineContentScript({
 		browser.storage.onChanged.addListener((changes, area) => {
 			if (area !== 'local' || !changes.settings) return
 
-			mounted = undefined
+			// The image preview switch needs no new page view; sync() still applies it before its early return.
+			const withoutPreview = (value: unknown) =>
+				JSON.stringify({ ...(value as Partial<Settings>), showImagePreview: undefined })
+			if (withoutPreview(changes.settings.oldValue) !== withoutPreview(changes.settings.newValue))
+				mounted = undefined
 			void sync()
 		})
 		// GitHub navigates with pushState; currententrychange covers it, navigatesuccess the rest.
