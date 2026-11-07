@@ -2,7 +2,17 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { findPullRows, parsePullsListUrl, renderStats, STATS_ATTRIBUTE } from './rows'
+import {
+	CONFLICTS_ATTRIBUTE,
+	CONFLICTS_TITLE,
+	clearAllStats,
+	clearConflicts,
+	findPullRows,
+	parsePullsListUrl,
+	renderConflicts,
+	renderStats,
+	STATS_ATTRIBUTE,
+} from './rows'
 
 const FIXTURE = readFileSync(resolve(process.cwd(), 'fixtures/github-pulls-list.html'), 'utf8')
 
@@ -34,6 +44,20 @@ describe('findPullRows', () => {
 		expect(rows[0]).toMatchObject({ owner: 'TanStack', repo: 'router', number: 8612 })
 		expect(rows[0]?.meta.textContent).toContain('#8612')
 	})
+
+	it('reads open and draft rows as open, closed and merged ones as not', () => {
+		const icon = document.querySelector('svg.octicon') as SVGElement
+		expect(findPullRows()[0]?.isOpen).toBe(true)
+
+		for (const [name, isOpen] of [
+			['octicon-git-pull-request', true],
+			['octicon-git-pull-request-closed', false],
+			['octicon-git-merge', false],
+		] as const) {
+			icon.setAttribute('class', `octicon ${name}`)
+			expect(findPullRows()[0]?.isOpen).toBe(isOpen)
+		}
+	})
 })
 
 describe('renderStats', () => {
@@ -60,5 +84,65 @@ describe('renderStats', () => {
 		renderStats(meta, 'TanStack/router/8612', stats)
 
 		expect(meta.lastElementChild?.hasAttribute(STATS_ATTRIBUTE)).toBe(true)
+	})
+})
+
+describe('renderConflicts', () => {
+	const meta = () => findPullRows()[0]?.meta as HTMLElement
+	const stats = { additions: 1, deletions: 1, files: 1 }
+
+	it('appends one red marker with the conflict explained in its title', () => {
+		renderConflicts(meta())
+		renderConflicts(meta())
+
+		const markers = meta().querySelectorAll<HTMLElement>(`[${CONFLICTS_ATTRIBUTE}]`)
+		expect(markers).toHaveLength(1)
+		expect(markers[0]?.title).toBe(CONFLICTS_TITLE)
+		expect(markers[0]?.textContent).toBe('·Conflicts')
+		expect(markers[0]?.querySelector('.fgColor-danger')?.textContent).toBe('Conflicts')
+	})
+
+	it('keeps the stats before the marker and both behind content GitHub appends later', () => {
+		renderConflicts(meta())
+		renderStats(meta(), 'TanStack/router/8612', stats)
+		expect(meta().lastElementChild?.hasAttribute(CONFLICTS_ATTRIBUTE)).toBe(true)
+		expect(meta().lastElementChild?.previousElementSibling?.hasAttribute(STATS_ATTRIBUTE)).toBe(
+			true,
+		)
+
+		const badge = document.createElement('span')
+		meta().append(badge)
+		renderStats(meta(), 'TanStack/router/8612', stats)
+		renderConflicts(meta())
+		expect([...meta().children].slice(-3)).toEqual([
+			badge,
+			meta().querySelector(`[${STATS_ATTRIBUTE}]`),
+			meta().querySelector(`[${CONFLICTS_ATTRIBUTE}]`),
+		])
+	})
+
+	it('settles: a second pass over a placed row changes nothing', () => {
+		renderStats(meta(), 'TanStack/router/8612', stats)
+		renderConflicts(meta())
+		const before = meta().innerHTML
+		const observer = new MutationObserver(() => undefined)
+		observer.observe(meta(), { childList: true, subtree: true })
+		renderStats(meta(), 'TanStack/router/8612', stats)
+		renderConflicts(meta())
+
+		expect(observer.takeRecords()).toHaveLength(0)
+		expect(meta().innerHTML).toBe(before)
+		observer.disconnect()
+	})
+
+	it('is removed by clearConflicts and clearAllStats', () => {
+		renderConflicts(meta())
+		clearConflicts(meta())
+		expect(meta().querySelector(`[${CONFLICTS_ATTRIBUTE}]`)).toBeNull()
+
+		renderConflicts(meta())
+		renderStats(meta(), 'TanStack/router/8612', stats)
+		clearAllStats()
+		expect(document.querySelector(`[${CONFLICTS_ATTRIBUTE}], [${STATS_ATTRIBUTE}]`)).toBeNull()
 	})
 })

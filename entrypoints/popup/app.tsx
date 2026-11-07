@@ -88,7 +88,7 @@ export function App({ settings, usage: initialUsage, isLoading = false }: AppPro
 					checked={showListStats}
 					onChange={(event) => void toggleListStats(event.target.checked)}
 				/>
-				Show diff size on pull request lists
+				Show diff size and conflicts on pull request lists
 			</label>
 			<label className="flex flex-col gap-1 text-neutral-400 text-xs">
 				OpenRouter API key

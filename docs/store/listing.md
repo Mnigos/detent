@@ -17,8 +17,8 @@ Review GitHub pull requests in ordered layers, rank files by review risk, and se
 
 ## Full description
 
-detent changes how you read a GitHub pull request, and shows how big each pull request is before
-you open it.
+detent changes how you read a GitHub pull request, and shows how big each pull request is, and
+whether it has merge conflicts, before you open it.
 
 Layers. The changed files are grouped into review steps instead of one alphabetical list: one
 behavior change per step, with the data shape first, then the code that implements it, then its
@@ -31,8 +31,9 @@ Files. Priority sorts the files into Urgent (at most 10), High, Medium and Low, 
 reason on the Urgent and High ones, so a reviewer short on time knows what to read first. Low
 starts folded.
 
-Diff size on pull request lists. On a repository's pull request list every row shows
-+additions −deletions · N files.
+Diff size and conflicts on pull request lists. On a repository's pull request list every row shows
++additions −deletions · N files, and a red Conflicts marker on an open pull request whose branch
+conflicts with its base (signed in to GitHub).
 
 On the pull request page:
 
@@ -48,11 +49,12 @@ the steps, following a description that tells reviewers where to start, and rank
 Priority Review. Grouping and Priority Review are separate requests, each cached in the browser per
 pull request, model and diff revision, so switching models or pushing new commits asks again. Without a key the steps come from the file structure and the priorities
 from file paths and change sizes, computed locally. The popup shows what your requests cost so
-far, and has switches to turn detent off or to hide the list diff sizes.
+far, and has switches to turn detent off or to hide the list diff sizes and conflicts.
 
 What leaves the browser: diffs are downloaded from GitHub with your GitHub session. Only when you
 saved an OpenRouter key, the title, description, changed file paths and diff excerpts of the pull
-request you open go to OpenRouter under that key. Diff sizes on lists never go to OpenRouter.
+request you open go to OpenRouter under that key. Diff sizes and conflict states on lists never go
+to OpenRouter.
 There is no detent server and no analytics.
 
 Source code (GPL-3.0): https://github.com/Mnigos/detent
@@ -60,16 +62,19 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
 ## Permission justifications
 
 - **storage**: keeps the settings (OpenRouter key, model, two switches), cached step groupings
-  and priority rankings per pull request revision, cached diff sizes for pull request lists, and a
-  local usage counter in the browser. Session storage holds the review position of the open pull
-  request.
+  and priority rankings per pull request revision, cached diff sizes and conflict states for pull
+  request lists, and a local usage counter in the browser. Session storage holds the review
+  position of the open pull request.
 - **Host permission `https://github.com/*`**: the extension renders inside GitHub pull request
   pages and pull request lists. It matches the whole site because GitHub moves between pages by
   in-page navigation, where a script matched only on `/pull/` or `/pulls` URLs would never run. On
   other pages it only watches the URL. The service worker downloads each pull request's diff from
   `https://github.com/<owner>/<repo>/pull/<number>.diff`: for the open pull request to build the
   steps, and for each pull request listed on a `/<owner>/<repo>/pulls` page to count its additions,
-  deletions and files.
+  deletions and files. On those lists the content script also reads, with the user's GitHub
+  session, the merge box state GitHub's own page loads from
+  `https://github.com/<owner>/<repo>/pull/<number>/page_data/merge_box`, to mark pull requests with
+  merge conflicts.
 - **Host permission `https://patch-diff.githubusercontent.com/*`**: GitHub redirects those diff
   downloads to this host, which sends no CORS headers for the page, so the service worker follows
   the redirect itself.
@@ -93,7 +98,8 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
 ## Single purpose statement
 
 Helps review GitHub pull requests: groups a pull request's files into ordered review steps, ranks
-them by review priority, and shows the diff size of each pull request on pull request lists.
+them by review priority, and shows the diff size and merge conflicts of each pull request on pull
+request lists.
 
 ## Assets
 
