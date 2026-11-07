@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 import {
+	CONFLICTS_KEY,
+	CONFLICTS_TTL_MILLISECONDS,
 	evictOldest,
 	isFresh,
+	readConflictsCache,
 	readStatsCache,
 	STATS_KEY,
 	STATS_TTL_MILLISECONDS,
 	type StatsCache,
+	writeConflictsEntry,
 	writeStatsEntry,
 } from './cache'
 
@@ -22,6 +26,14 @@ describe('isFresh', () => {
 		expect(isFresh(entry(0), STATS_TTL_MILLISECONDS)).toBe(false)
 		expect(isFresh({ failed: true, at: 0 }, 1)).toBe(true)
 		expect(isFresh(undefined, 0)).toBe(false)
+	})
+
+	it('keeps a conflict state for five minutes only', () => {
+		const conflict = { hasConflicts: true, at: 0 }
+
+		expect(CONFLICTS_TTL_MILLISECONDS).toBe(5 * 60 * 1000)
+		expect(isFresh(conflict, CONFLICTS_TTL_MILLISECONDS - 1, CONFLICTS_TTL_MILLISECONDS)).toBe(true)
+		expect(isFresh(conflict, CONFLICTS_TTL_MILLISECONDS, CONFLICTS_TTL_MILLISECONDS)).toBe(false)
 	})
 })
 
@@ -43,5 +55,21 @@ describe('storage', () => {
 			'o/r/1': entry(1),
 			'o/r/2': { failed: true, at: 2 },
 		})
+	})
+
+	it('keeps conflict states apart from the diff stats', async () => {
+		await fakeBrowser.storage.local.set({
+			[CONFLICTS_KEY]: {
+				'o/r/1': { hasConflicts: true, at: 1 },
+				bad: { hasConflicts: 'yes', at: 1 },
+			},
+		})
+		await writeConflictsEntry('o/r/2', { hasConflicts: false, at: 2 })
+
+		await expect(readConflictsCache()).resolves.toEqual({
+			'o/r/1': { hasConflicts: true, at: 1 },
+			'o/r/2': { hasConflicts: false, at: 2 },
+		})
+		await expect(readStatsCache()).resolves.toEqual({})
 	})
 })
