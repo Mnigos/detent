@@ -75,8 +75,13 @@ function build(): ShadowRoot {
 	)
 	root.append(style, dialog)
 
+	// A press on the image that is released on the backdrop clicks the stage; only a press that starts there closes.
+	let pressedOnStage = false
+	stage.addEventListener('mousedown', (event) => {
+		pressedOnStage = event.target === stage
+	})
 	stage.addEventListener('click', (event) => {
-		if (event.target === stage) closeImagePreview()
+		if (pressedOnStage && event.target === stage) closeImagePreview()
 	})
 	zoom.addEventListener('click', () => setZoom(zoom.getAttribute('aria-pressed') !== 'true'))
 	part(root, '.close').addEventListener('click', () => closeImagePreview())
