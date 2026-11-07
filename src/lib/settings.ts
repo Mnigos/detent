@@ -10,6 +10,8 @@ export interface Settings {
 	isEnabled: boolean
 	/** Diff size (+additions −deletions · files) on each row of a pull request list. */
 	showListStats: boolean
+	/** Clicking an image in a description or comment opens it over the page, not in a new tab. */
+	showImagePreview: boolean
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string'
@@ -25,6 +27,7 @@ export async function readSettings(): Promise<Settings> {
 		model: model || DEFAULT_MODEL,
 		isEnabled: stored?.isEnabled !== false,
 		showListStats: stored?.showListStats !== false,
+		showImagePreview: stored?.showImagePreview !== false,
 	}
 }
 

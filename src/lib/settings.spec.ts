@@ -13,6 +13,7 @@ describe('readSettings', () => {
 			model: DEFAULT_MODEL,
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		})
 	})
 
@@ -26,6 +27,7 @@ describe('readSettings', () => {
 			model: DEFAULT_MODEL,
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		})
 	})
 
@@ -37,6 +39,7 @@ describe('readSettings', () => {
 			model: DEFAULT_MODEL,
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		})
 	})
 
@@ -51,6 +54,12 @@ describe('readSettings', () => {
 		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { showListStats: false } })
 		expect((await readSettings()).showListStats).toBe(false)
 	})
+
+	it('previews images unless the stored flag says false', async () => {
+		expect((await readSettings()).showImagePreview).toBe(true)
+		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { showImagePreview: false } })
+		expect((await readSettings()).showImagePreview).toBe(false)
+	})
 })
 
 describe('writeSettings', () => {
@@ -62,6 +71,7 @@ describe('writeSettings', () => {
 			model: 'anthropic/claude-sonnet-5',
 			isEnabled: true,
 			showListStats: true,
+			showImagePreview: true,
 		})
 		await expect(fakeBrowser.storage.local.get(SETTINGS_KEY)).resolves.toEqual({
 			[SETTINGS_KEY]: {
@@ -69,6 +79,7 @@ describe('writeSettings', () => {
 				model: 'anthropic/claude-sonnet-5',
 				isEnabled: true,
 				showListStats: true,
+				showImagePreview: true,
 			},
 		})
 	})

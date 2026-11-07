@@ -1,4 +1,6 @@
 import { browser } from 'wxt/browser'
+import { startImagePreview } from '@/src/image-preview/mount'
+import { closeImagePreview } from '@/src/image-preview/overlay'
 import { parsePullsListUrl } from '@/src/lib/list/rows'
 import {
 	hideGroupButton,
@@ -13,7 +15,7 @@ import {
 	parsePullRequestUrl,
 	pullRequestScope,
 } from '@/src/lib/pull-request-url'
-import { readSettings } from '@/src/lib/settings'
+import { readSettings, type Settings } from '@/src/lib/settings'
 import { startListStats } from '@/src/list/mount'
 import { startPanel } from '@/src/panel/mount'
 import { startTree } from '@/src/tree/mount'
@@ -49,6 +51,8 @@ export default defineContentScript({
 		let generation = 0
 		// The pull request page the button was shown for; leaving it removes the button at once.
 		let gated: PullRequestLocation | undefined
+		// Read with the other settings on every sync; a click has to decide before any await.
+		let previewsImages = false
 
 		const isShown = (location: PullRequestLocation) => {
 			const now = parsePullRequestUrl(window.location.href)
@@ -63,7 +67,9 @@ export default defineContentScript({
 			}
 			const location = parsePullRequestUrl(window.location.href)
 			const list = parsePullsListUrl(window.location.href)
-			const { isEnabled, showListStats } = await readSettings()
+			const { isEnabled, showListStats, showImagePreview } = await readSettings()
+			previewsImages = isEnabled && showImagePreview
+			if (!previewsImages) closeImagePreview()
 			const view = !isEnabled
 				? undefined
 				: location?.tab === 'files'
@@ -144,12 +150,17 @@ export default defineContentScript({
 			}
 		}
 
+		startImagePreview(() => previewsImages)
 		void sync()
 		// Switching the extension off or on in the popup applies to open pages at once.
 		browser.storage.onChanged.addListener((changes, area) => {
 			if (area !== 'local' || !changes.settings) return
 
-			mounted = undefined
+			// The image preview switch needs no new page view; sync() still applies it before its early return.
+			const withoutPreview = (value: unknown) =>
+				JSON.stringify({ ...(value as Partial<Settings>), showImagePreview: undefined })
+			if (withoutPreview(changes.settings.oldValue) !== withoutPreview(changes.settings.newValue))
+				mounted = undefined
 			void sync()
 		})
 		// GitHub navigates with pushState; currententrychange covers it, navigatesuccess the rest.
