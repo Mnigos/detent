@@ -1,5 +1,6 @@
 const MARKDOWN_BODY = '.markdown-body'
 const NOT_PREVIEWED = '.emoji, g-emoji, .avatar, [data-hovercard-type]'
+const SIGNED_HOST = 'private-user-images.githubusercontent.com'
 // /user-attachments/assets/<id> redirects to the signed upload, whose file name carries the id.
 const ATTACHMENT = /^\/user-attachments\/assets\/([\da-f-]{36})$/
 // A repository file links to its blob page and loads from its raw address.
@@ -28,8 +29,9 @@ const sourcesOf = (image: HTMLImageElement) =>
 		.map(parse)
 		.filter((url) => url !== undefined)
 
-// The signature in the query changes with every render, so an image is its address without it.
-const identity = (url: URL) => `${url.origin}${url.pathname.replace(FILE_VIEW, '$1/raw/')}`
+// An upload's signature in the query changes with every render; elsewhere the query names the image.
+const identity = (url: URL) =>
+	`${url.origin}${url.pathname.replace(FILE_VIEW, '$1/raw/')}${url.hostname === SIGNED_HOST ? '' : url.search}`
 
 // GitHub wraps each markdown image in a link to itself; a badge or logo links somewhere else.
 function linksToImage(link: HTMLAnchorElement, image: HTMLImageElement): boolean {
