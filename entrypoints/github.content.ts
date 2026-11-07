@@ -15,7 +15,7 @@ import {
 	parsePullRequestUrl,
 	pullRequestScope,
 } from '@/src/lib/pull-request-url'
-import { readSettings } from '@/src/lib/settings'
+import { readSettings, type Settings } from '@/src/lib/settings'
 import { startListStats } from '@/src/list/mount'
 import { startPanel } from '@/src/panel/mount'
 import { startTree } from '@/src/tree/mount'
@@ -156,7 +156,11 @@ export default defineContentScript({
 		browser.storage.onChanged.addListener((changes, area) => {
 			if (area !== 'local' || !changes.settings) return
 
-			mounted = undefined
+			// The image preview switch needs no new page view; sync() still applies it before its early return.
+			const withoutPreview = (value: unknown) =>
+				JSON.stringify({ ...(value as Partial<Settings>), showImagePreview: undefined })
+			if (withoutPreview(changes.settings.oldValue) !== withoutPreview(changes.settings.newValue))
+				mounted = undefined
 			void sync()
 		})
 		// GitHub navigates with pushState; currententrychange covers it, navigatesuccess the rest.
