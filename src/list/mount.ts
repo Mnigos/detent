@@ -56,6 +56,16 @@ function createPool(load: (ref: Ref) => Promise<void>) {
 
 	return {
 		has: (key: string) => queued.has(key),
+		/** Drops waiting loads for rows no longer on the page (a changed filter or page). */
+		retain(keys: Set<string>) {
+			for (let index = queue.length - 1; index >= 0; index -= 1) {
+				const key = statsKey(queue[index] as Ref)
+				if (keys.has(key)) continue
+
+				queue.splice(index, 1)
+				queued.delete(key)
+			}
+		},
 		push(ref: Ref) {
 			queued.add(statsKey(ref))
 			queue.push(ref)
@@ -86,7 +96,11 @@ export async function startListStats() {
 	// (pagination, a changed filter) get theirs, and stale or missing ones are queued once.
 	function apply() {
 		const now = Date.now()
-		for (const row of findPullRows()) {
+		const rows = findPullRows()
+		const keys = new Set(rows.map(statsKey))
+		statsPool.retain(keys)
+		conflictsPool.retain(keys)
+		for (const row of rows) {
 			const key = statsKey(row)
 			const ref = { owner: row.owner, repo: row.repo, number: row.number }
 			const entry = stats[key]
@@ -94,13 +108,15 @@ export async function startListStats() {
 			else clearStats(row.meta)
 			if (!isFresh(entry) && !statsPool.has(key)) statsPool.push(ref)
 
+			// A stale state is as good as unknown: the base may have moved since.
 			const conflict = conflicts[key]
-			if (row.isOpen && conflict?.hasConflicts) renderConflicts(row.meta)
+			const isConflictFresh = isFresh(conflict, now, CONFLICTS_TTL_MILLISECONDS)
+			if (row.isOpen && isConflictFresh && conflict?.hasConflicts) renderConflicts(row.meta)
 			else clearConflicts(row.meta)
 			if (
 				canAskConflicts &&
 				row.isOpen &&
-				!isFresh(conflict, now, CONFLICTS_TTL_MILLISECONDS) &&
+				!isConflictFresh &&
 				now >= (unknownUntil.get(key) ?? 0) &&
 				!conflictsPool.has(key)
 			)

@@ -98,7 +98,8 @@ async function run(name, url, { signedIn }) {
 		name,
 		url,
 		signedIn,
-		asked: [...new Set(asked)].sort(),
+		// Every request, repeats included, so a request loop fails the per-row count.
+		asked: asked.sort((a, b) => a - b),
 		marked,
 		rows: result,
 		screenshot,
@@ -118,7 +119,10 @@ const checks = {
 	'signed out asks for no merge box': signedOut.asked.length === 0,
 	'signed out shows no marker': signedOut.marked.length === 0,
 	'signed out still shows diff stats': signedOut.rows.some((row) => row.stats),
-	'signed in asks once per open row': signedIn.asked.length === openRows.length,
+	// The run ends before the 15 s retry of an unknown state, so every open row is asked exactly once.
+	'signed in asks once per open row':
+		signedIn.asked.length === openRows.length &&
+		openRows.every((row) => signedIn.asked.filter((number) => number === row.number).length === 1),
 	'signed in marks exactly the conflicting rows': (() => {
 		const expected = CONFLICTS.filter((number) => listed.includes(number))
 		return expected.length > 0 && JSON.stringify(signedIn.marked) === JSON.stringify(expected)
