@@ -133,6 +133,23 @@ describe('renderStats', () => {
 		expect(meta.lastElementChild?.textContent).toBe('·+1 717−67·30 files')
 		expect(meta.querySelector(`[${STATS_ATTRIBUTE}] [title]`)).toBeNull()
 	})
+
+	it('updates the title when only what was left out changes', () => {
+		const meta = findPullRows()[0]?.meta as HTMLElement
+		const stats = { ...plain(20, 0, 2), code: { additions: 10, deletions: 0 } }
+		renderStats(meta, 'TanStack/router/8612', {
+			...stats,
+			excluded: { tests: { additions: 10, deletions: 0 } },
+		})
+		renderStats(meta, 'TanStack/router/8612', {
+			...stats,
+			excluded: { docs: { additions: 10, deletions: 0 } },
+		})
+
+		expect(meta.querySelector(`[${STATS_ATTRIBUTE}] [title]`)?.getAttribute('title')).toMatch(
+			/^Excluded: docs \+10\./,
+		)
+	})
 })
 
 describe('renderConflicts', () => {
