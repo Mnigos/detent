@@ -32,9 +32,10 @@ reason on the Urgent and High ones, so a reviewer short on time knows what to re
 starts folded.
 
 Diff size and conflicts on pull request lists. On a repository's pull request list every row shows
-+additions −deletions · N files, and a red Conflicts marker on an open pull request whose branch
-conflicts with its base, or an orange Can't rebase one when it merges but would not rebase cleanly
-(signed in to GitHub).
++additions −deletions · N files, followed by the lines of code alone when tests, docs, lockfiles,
+generated files, blank and comment lines or whitespace-only changes make up part of the diff, and a
+red Conflicts marker on an open pull request whose branch conflicts with its base, or an orange
+Can't rebase one when it merges but would not rebase cleanly (signed in to GitHub).
 
 On the pull request page:
 
@@ -72,8 +73,8 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
   other pages it only watches the URL. The service worker downloads each pull request's diff from
   `https://github.com/<owner>/<repo>/pull/<number>.diff`: for the open pull request to build the
   steps, and for each pull request listed on a `/<owner>/<repo>/pulls` page to count its additions,
-  deletions and files. On those lists the service worker also reads, with the user's GitHub
-  session, the merge box state GitHub's own page loads from
+  deletions, files and lines of code. On those lists the service worker also reads, with the user's
+  GitHub session, the merge box state GitHub's own page loads from
   `https://github.com/<owner>/<repo>/pull/<number>/page_data/merge_box`, to mark pull requests with
   merge conflicts or a blocked rebase, and after GitHub switches a list to another filter or page,
   that page's list data as JSON, to know each row's head commit.
