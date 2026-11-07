@@ -1,7 +1,9 @@
 import { browser } from 'wxt/browser'
 import type { DiffStats } from './stats'
 
-export const STATS_KEY = 'diffStats'
+// The version moves whenever the counted shape changes, so entries of an older build are not shown.
+export const STATS_KEY = 'diffStats:v2'
+export const LEGACY_STATS_KEYS = ['diffStats']
 export const STATS_TTL_MILLISECONDS = 10 * 60 * 1000
 export const CONFLICTS_KEY = 'mergeConflicts'
 // Conflicts appear when the base branch moves, which the row does not show, so they are asked again soon.
@@ -47,7 +49,9 @@ const isStatsEntry = (value: unknown): value is StatsEntry => {
 		value.failed === true ||
 		(typeof value.additions === 'number' &&
 			typeof value.deletions === 'number' &&
-			typeof value.files === 'number')
+			typeof value.files === 'number' &&
+			typeof value.code === 'object' &&
+			typeof value.excluded === 'object')
 	)
 }
 
@@ -99,3 +103,5 @@ export const readStatsCache = stats.read
 export const writeStatsEntry = stats.write
 export const readConflictsCache = conflicts.read
 export const writeConflictsEntry = conflicts.write
+
+export const removeLegacyStatsCaches = () => browser.storage.local.remove(LEGACY_STATS_KEYS)

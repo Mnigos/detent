@@ -6,6 +6,7 @@ import {
 	fetchPullRequestDiff,
 	PullRequestDiffError,
 } from '@/src/lib/diff/fetch-diff'
+import { removeLegacyStatsCaches } from '@/src/lib/list/cache'
 import {
 	LABEL_LAYERS_MESSAGE,
 	type LabelLayersRequest,
@@ -25,6 +26,10 @@ export default defineBackground(() => {
 	browser.storage.session
 		.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' })
 		.catch((error: unknown) => console.warn('[detent]', error))
+
+	browser.runtime.onInstalled.addListener(() => {
+		removeLegacyStatsCaches().catch((error: unknown) => console.warn('[detent]', error))
+	})
 
 	browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (isRequest<FetchDiffRequest>(message, FETCH_DIFF_MESSAGE)) {

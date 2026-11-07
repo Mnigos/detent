@@ -7,8 +7,8 @@ import { type PrioritizeResponse, resolvePriorities } from './lib/model/label-pr
 
 vi.mock('wxt/browser', () => ({
 	browser: {
-		storage: { session: { setAccessLevel: vi.fn() } },
-		runtime: { onMessage: { addListener: vi.fn() } },
+		storage: { session: { setAccessLevel: vi.fn() }, local: { remove: vi.fn() } },
+		runtime: { onMessage: { addListener: vi.fn() }, onInstalled: { addListener: vi.fn() } },
 	},
 }))
 vi.mock('./lib/diff/fetch-diff', () => ({
@@ -47,6 +47,16 @@ describe('background priorities message', () => {
 		expect(browser.storage.session.setAccessLevel).toHaveBeenCalledExactlyOnceWith({
 			accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
 		})
+	})
+
+	it('removes the list stats caches of older versions on install and update', async () => {
+		vi.mocked(browser.storage.local.remove).mockResolvedValue(undefined)
+		const onInstalled = vi.mocked(browser.runtime.onInstalled.addListener).mock.calls[0]?.[0] as (
+			details: object,
+		) => void
+		onInstalled({ reason: 'update' })
+
+		expect(browser.storage.local.remove).toHaveBeenCalledExactlyOnceWith(['diffStats'])
 	})
 
 	it('keeps the channel open and sends exactly the asynchronous ranking answer', async () => {
