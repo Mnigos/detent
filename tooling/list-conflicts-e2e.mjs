@@ -2,7 +2,7 @@
 // Usage: bun run build && node tooling/list-conflicts-e2e.mjs
 // Run 1 (signed out as GitHub serves it): no merge box request and no marker, the diff stats still show.
 // Run 2 (simulated sign-in): the list's empty user-login meta tag is filled in and every merge box request is
-// answered from CONFLICTS (DIRTY), UNKNOWN (UNKNOWN) or CLEAN, so the marker path runs on GitHub's real list DOM.
+// answered DIRTY, UNKNOWN or CLEAN (see isConflicting and isUnknown), so the marker path runs on GitHub's real list DOM.
 // The real signed-in merge box answer is not covered; check it by hand in a signed-in browser.
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,9 +13,12 @@ const EXTENSION_PATH = join(import.meta.dirname, '..', '.output', 'chrome-mv3')
 const OUTPUT = mkdtempSync(join(tmpdir(), 'detent-conflicts-e2e-'))
 const LIST = process.env.LIST ?? 'https://github.com/TanStack/router/pulls'
 const CLOSED = `${LIST}?q=is%3Apr+is%3Aclosed`
-// TanStack/router #8842 had mergeable_state "dirty" in the REST API on 2026-11-07.
-const CONFLICTS = (process.env.CONFLICTS ?? '8842').split(',').map(Number)
-const UNKNOWN = (process.env.UNKNOWN ?? '8858').split(',').map(Number)
+// Without CONFLICTS or UNKNOWN the stub picks rows by number, so no pull request has to stay open.
+const numbers = (value) => value?.split(',').map(Number)
+const conflictsOf = numbers(process.env.CONFLICTS)
+const unknownOf = numbers(process.env.UNKNOWN)
+const isConflicting = (number) => conflictsOf?.includes(number) ?? number % 3 === 0
+const isUnknown = (number) => unknownOf?.includes(number) ?? number % 3 === 1
 const MERGE_BOX = /\/pull\/(\d+)\/page_data\/merge_box/
 
 async function run(name, url, { signedIn }) {
@@ -51,11 +54,7 @@ async function run(name, url, { signedIn }) {
 		)
 		await page.route(MERGE_BOX, (route) => {
 			const number = Number(MERGE_BOX.exec(route.request().url())?.[1])
-			const status = CONFLICTS.includes(number)
-				? 'DIRTY'
-				: UNKNOWN.includes(number)
-					? 'UNKNOWN'
-					: 'CLEAN'
+			const status = isConflicting(number) ? 'DIRTY' : isUnknown(number) ? 'UNKNOWN' : 'CLEAN'
 			return route.fulfill({
 				json: { pullRequest: { state: 'OPEN', mergeStateStatus: status }, mergeRequirements: {} },
 			})
@@ -106,14 +105,18 @@ async function run(name, url, { signedIn }) {
 	}
 }
 
-const report = { output: OUTPUT, conflicts: CONFLICTS, unknown: UNKNOWN, runs: [] }
+const report = {
+	output: OUTPUT,
+	conflicts: conflictsOf ?? 'n % 3 = 0',
+	unknown: unknownOf ?? 'n % 3 = 1',
+	runs: [],
+}
 report.runs.push(await run('signed-out', LIST, { signedIn: false }))
 report.runs.push(await run('simulated-sign-in', LIST, { signedIn: true }))
 report.runs.push(await run('simulated-sign-in-closed', CLOSED, { signedIn: true }))
 writeFileSync(join(OUTPUT, 'report.json'), JSON.stringify(report, null, 2))
 
 const [signedOut, signedIn, closed] = report.runs
-const listed = signedIn.rows.map((row) => row.number)
 const openRows = signedIn.rows.filter((row) => /^(Open|Draft) pull request$/.test(row.state ?? ''))
 const checks = {
 	'signed out asks for no merge box': signedOut.asked.length === 0,
@@ -122,13 +125,13 @@ const checks = {
 	// One request per open row; an unknown row may get its single retry 15 s later, if the run lasted that long.
 	'signed in asks once per open row, unknown ones at most twice': openRows.every((row) => {
 		const count = signedIn.asked.filter((number) => number === row.number).length
-		return count === 1 || (count === 2 && UNKNOWN.includes(row.number))
+		return count === 1 || (count === 2 && isUnknown(row.number))
 	}),
 	'signed in asks only about open rows': signedIn.asked.every((number) =>
 		openRows.some((row) => row.number === number),
 	),
 	'signed in marks exactly the conflicting rows': (() => {
-		const expected = CONFLICTS.filter((number) => listed.includes(number))
+		const expected = openRows.map((row) => row.number).filter(isConflicting)
 		return expected.length > 0 && JSON.stringify(signedIn.marked) === JSON.stringify(expected)
 	})(),
 	'closed list asks for nothing and marks nothing':
