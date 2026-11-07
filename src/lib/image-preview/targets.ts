@@ -1,17 +1,9 @@
 const MARKDOWN_BODY = '.markdown-body'
 const NOT_PREVIEWED = '.emoji, g-emoji, .avatar, [data-hovercard-type]'
-// GitHub serves uploads, proxied external images and repository files from these hosts.
-const IMAGE_HOSTS = new Set([
-	'camo.githubusercontent.com',
-	'private-user-images.githubusercontent.com',
-	'user-images.githubusercontent.com',
-	'raw.githubusercontent.com',
-	'media.githubusercontent.com',
-	'objects.githubusercontent.com',
-])
-// /user-attachments/assets/<id> redirects to the signed upload; /<owner>/<repo>/assets/<id> is older.
-const ASSET_PATH = /^\/(?:user-attachments|[^/]+\/[^/]+)\/assets\//
-const IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|avif|svg|bmp)$/i
+// /user-attachments/assets/<id> redirects to the signed upload, whose file name carries the id.
+const ATTACHMENT = /^\/user-attachments\/assets\/([\da-f-]{36})$/
+// A repository file links to its blob page and loads from its raw address.
+const FILE_VIEW = /^(\/[^/]+\/[^/]+)\/(?:blob|raw)\//
 
 export interface PreviewImage {
 	image: HTMLImageElement
@@ -33,17 +25,23 @@ const parse = (url: string) => {
 const sourcesOf = (image: HTMLImageElement) =>
 	[image.currentSrc, image.src, image.getAttribute('data-canonical-src') ?? '']
 		.filter(Boolean)
-		.map((url) => parse(url)?.href)
+		.map(parse)
+		.filter((url) => url !== undefined)
+
+// The signature in the query changes with every render, so an image is its address without it.
+const identity = (url: URL) => `${url.origin}${url.pathname.replace(FILE_VIEW, '$1/raw/')}`
 
 // GitHub wraps each markdown image in a link to itself; a badge or logo links somewhere else.
 function linksToImage(link: HTMLAnchorElement, image: HTMLImageElement): boolean {
 	const url = parse(link.getAttribute('href') ?? '')
 	if (!url) return false
-	if (sourcesOf(image).includes(url.href)) return true
-	if (IMAGE_HOSTS.has(url.hostname)) return true
-	if (url.hostname === 'github.com' && ASSET_PATH.test(url.pathname)) return true
 
-	return IMAGE_FILE.test(url.pathname)
+	const sources = sourcesOf(image)
+	if (sources.some((source) => identity(source) === identity(url))) return true
+
+	const attachment = url.hostname === 'github.com' ? ATTACHMENT.exec(url.pathname)?.[1] : undefined
+
+	return attachment !== undefined && sources.some((source) => source.pathname.includes(attachment))
 }
 
 const linkOf = (image: HTMLImageElement) => image.closest<HTMLAnchorElement>('a[href]')
