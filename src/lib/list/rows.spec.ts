@@ -9,6 +9,7 @@ import {
 	clearConflicts,
 	findPullRows,
 	parsePullsListUrl,
+	REBASE_BLOCKED_TITLE,
 	renderConflicts,
 	renderStats,
 	STATS_ATTRIBUTE,
@@ -92,8 +93,8 @@ describe('renderConflicts', () => {
 	const stats = { additions: 1, deletions: 1, files: 1 }
 
 	it('appends one red marker with the conflict explained in its title', () => {
-		renderConflicts(meta())
-		renderConflicts(meta())
+		renderConflicts(meta(), 'conflicts')
+		renderConflicts(meta(), 'conflicts')
 
 		const markers = meta().querySelectorAll<HTMLElement>(`[${CONFLICTS_ATTRIBUTE}]`)
 		expect(markers).toHaveLength(1)
@@ -102,8 +103,29 @@ describe('renderConflicts', () => {
 		expect(markers[0]?.querySelector('.fgColor-danger')?.textContent).toBe('Conflicts')
 	})
 
+	it('marks a blocked rebase in the attention tone, and swaps one marker for the other', () => {
+		renderConflicts(meta(), 'rebase-blocked')
+		renderConflicts(meta(), 'rebase-blocked')
+
+		let markers = meta().querySelectorAll<HTMLElement>(`[${CONFLICTS_ATTRIBUTE}]`)
+		expect(markers).toHaveLength(1)
+		expect(markers[0]?.getAttribute(CONFLICTS_ATTRIBUTE)).toBe('rebase-blocked')
+		expect(markers[0]?.title).toBe(REBASE_BLOCKED_TITLE)
+		expect(markers[0]?.textContent).toBe("·Can't rebase")
+		expect(markers[0]?.querySelector('.fgColor-attention')?.textContent).toBe("Can't rebase")
+		expect(markers[0]?.querySelector('.fgColor-danger')).toBeNull()
+
+		renderConflicts(meta(), 'conflicts')
+		markers = meta().querySelectorAll<HTMLElement>(`[${CONFLICTS_ATTRIBUTE}]`)
+		expect(markers).toHaveLength(1)
+		expect(markers[0]?.getAttribute(CONFLICTS_ATTRIBUTE)).toBe('conflicts')
+		expect(markers[0]?.title).toBe(CONFLICTS_TITLE)
+		expect(markers[0]?.textContent).toBe('·Conflicts')
+		expect(meta().lastElementChild).toBe(markers[0])
+	})
+
 	it('keeps the stats before the marker and both behind content GitHub appends later', () => {
-		renderConflicts(meta())
+		renderConflicts(meta(), 'conflicts')
 		renderStats(meta(), 'TanStack/router/8612', stats)
 		expect(meta().lastElementChild?.hasAttribute(CONFLICTS_ATTRIBUTE)).toBe(true)
 		expect(meta().lastElementChild?.previousElementSibling?.hasAttribute(STATS_ATTRIBUTE)).toBe(
@@ -113,7 +135,7 @@ describe('renderConflicts', () => {
 		const badge = document.createElement('span')
 		meta().append(badge)
 		renderStats(meta(), 'TanStack/router/8612', stats)
-		renderConflicts(meta())
+		renderConflicts(meta(), 'conflicts')
 		expect([...meta().children].slice(-3)).toEqual([
 			badge,
 			meta().querySelector(`[${STATS_ATTRIBUTE}]`),
@@ -123,12 +145,12 @@ describe('renderConflicts', () => {
 
 	it('settles: a second pass over a placed row changes nothing', () => {
 		renderStats(meta(), 'TanStack/router/8612', stats)
-		renderConflicts(meta())
+		renderConflicts(meta(), 'conflicts')
 		const before = meta().innerHTML
 		const observer = new MutationObserver(() => undefined)
 		observer.observe(meta(), { childList: true, subtree: true })
 		renderStats(meta(), 'TanStack/router/8612', stats)
-		renderConflicts(meta())
+		renderConflicts(meta(), 'conflicts')
 
 		expect(observer.takeRecords()).toHaveLength(0)
 		expect(meta().innerHTML).toBe(before)
@@ -136,11 +158,11 @@ describe('renderConflicts', () => {
 	})
 
 	it('is removed by clearConflicts and clearAllStats', () => {
-		renderConflicts(meta())
+		renderConflicts(meta(), 'conflicts')
 		clearConflicts(meta())
 		expect(meta().querySelector(`[${CONFLICTS_ATTRIBUTE}]`)).toBeNull()
 
-		renderConflicts(meta())
+		renderConflicts(meta(), 'conflicts')
 		renderStats(meta(), 'TanStack/router/8612', stats)
 		clearAllStats()
 		expect(document.querySelector(`[${CONFLICTS_ATTRIBUTE}], [${STATS_ATTRIBUTE}]`)).toBeNull()

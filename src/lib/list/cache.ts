@@ -1,9 +1,11 @@
 import { browser } from 'wxt/browser'
+import type { ConflictState } from './conflicts'
 import type { DiffStats } from './stats'
 
 export const STATS_KEY = 'diffStats'
 export const STATS_TTL_MILLISECONDS = 10 * 60 * 1000
-export const CONFLICTS_KEY = 'mergeConflicts'
+// The version moves whenever the stored shape changes, so entries of an older build are not read.
+export const CONFLICTS_KEY = 'mergeConflicts:v2'
 // Conflicts appear when the base branch moves, which the row does not show, so they are asked again soon.
 export const CONFLICTS_TTL_MILLISECONDS = 5 * 60 * 1000
 export const STATS_CAP = 500
@@ -15,9 +17,11 @@ export type StatsCache = Record<string, StatsEntry>
 
 /** Only a state GitHub finished computing is stored; "unknown" is never cached. */
 export interface ConflictsEntry {
-	hasConflicts: boolean
+	state: Exclude<ConflictState, 'unknown'>
 	at: number
 }
+
+const CONFLICT_STATES = new Set<unknown>(['conflicts', 'rebase-blocked', 'clean'])
 
 export type ConflictsCache = Record<string, ConflictsEntry>
 
@@ -52,7 +56,7 @@ const isStatsEntry = (value: unknown): value is StatsEntry => {
 }
 
 const isConflictsEntry = (value: unknown): value is ConflictsEntry =>
-	isRecord(value) && typeof value.at === 'number' && typeof value.hasConflicts === 'boolean'
+	isRecord(value) && typeof value.at === 'number' && CONFLICT_STATES.has(value.state)
 
 /** Keeps the newest `cap` entries. */
 export function evictOldest<T extends { at: number }>(

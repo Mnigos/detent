@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { CONFLICTS_KEY, CONFLICTS_TTL_MILLISECONDS, readConflictsCache } from '@/src/lib/list/cache'
-import { CONFLICTS_ATTRIBUTE } from '@/src/lib/list/rows'
+import { CONFLICTS_ATTRIBUTE, REBASE_BLOCKED_TITLE } from '@/src/lib/list/rows'
 import { startListStats } from './mount'
 
 vi.mock('@/src/lib/diff/fetch-diff', () => ({
@@ -31,17 +31,38 @@ function renderList(rows: Row[], login = 'octocat') {
 	}
 }
 
+const markers = () =>
+	[...document.querySelectorAll<HTMLElement>(`[${CONFLICTS_ATTRIBUTE}]`)].map((marker) => ({
+		number: Number(
+			/\/pull\/(\d+)/.exec(
+				marker.closest('li')?.querySelector('a[href*="/pull/"]')?.getAttribute('href') ?? '',
+			)?.[1],
+		),
+		state: marker.getAttribute(CONFLICTS_ATTRIBUTE),
+		text: marker.textContent,
+	}))
+
 const marked = () =>
 	[...document.querySelectorAll(`[${CONFLICTS_ATTRIBUTE}]`)].map((marker) =>
 		marker.closest('li')?.querySelector('a[href*="/pull/"]')?.getAttribute('href'),
 	)
 
-// Answers each pull request number with a mergeStateStatus, or a status code.
+// Answers each pull request number with a mergeStateStatus, REBASE_BLOCKED (clean, but the rebase conflict
+// condition failed), or a status code.
 function stubMergeBox(states: Record<number, string | number>) {
 	const fetch = vi.fn(async (url: string) => {
 		const number = Number(/\/pull\/(\d+)\//.exec(url)?.[1])
 		const state = states[number] ?? 'CLEAN'
 		if (typeof state === 'number') return new Response('', { status: state })
+		if (state === 'REBASE_BLOCKED')
+			return Response.json({
+				pullRequest: { state: 'OPEN', mergeStateStatus: 'CLEAN' },
+				mergeRequirements: {
+					conditions: [
+						{ type: 'PULL_REQUEST_MERGE_CONFLICT_STATE', result: 'FAILED', conflicts: [] },
+					],
+				},
+			})
 
 		return Response.json({ pullRequest: { state: 'OPEN', mergeStateStatus: state } })
 	})
@@ -86,9 +107,45 @@ describe('list merge conflicts', () => {
 		await vi.waitFor(() => expect(marked()).toEqual(['https://github.com/o/r/pull/1']))
 		expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3])
 		await expect(readConflictsCache()).resolves.toMatchObject({
-			'o/r/1': { hasConflicts: true },
-			'o/r/2': { hasConflicts: false },
+			'o/r/1': { state: 'conflicts' },
+			'o/r/2': { state: 'clean' },
 		})
+	})
+
+	it("marks a rebase GitHub would refuse as Can't rebase, and a real conflict only as Conflicts", async () => {
+		renderList([{ number: 1 }, { number: 2 }, { number: 3 }])
+		stubMergeBox({ 1: 'REBASE_BLOCKED', 2: 'DIRTY', 3: 'CLEAN' })
+		await mount()
+
+		await vi.waitFor(() =>
+			expect(markers()).toEqual([
+				{ number: 1, state: 'rebase-blocked', text: "·Can't rebase" },
+				{ number: 2, state: 'conflicts', text: '·Conflicts' },
+			]),
+		)
+		expect(
+			document.querySelector(`[${CONFLICTS_ATTRIBUTE}="rebase-blocked"]`)?.getAttribute('title'),
+		).toBe(REBASE_BLOCKED_TITLE)
+		await expect(readConflictsCache()).resolves.toMatchObject({
+			'o/r/1': { state: 'rebase-blocked' },
+			'o/r/2': { state: 'conflicts' },
+			'o/r/3': { state: 'clean' },
+		})
+	})
+
+	it('swaps the marker when a stale state comes back different', async () => {
+		await fakeBrowser.storage.local.set({
+			[CONFLICTS_KEY]: {
+				'o/r/1': { state: 'rebase-blocked', at: Date.now() - CONFLICTS_TTL_MILLISECONDS - 1 },
+			},
+		})
+		renderList([{ number: 1 }])
+		stubMergeBox({ 1: 'DIRTY' })
+		await mount()
+
+		await vi.waitFor(() =>
+			expect(markers()).toEqual([{ number: 1, state: 'conflicts', text: '·Conflicts' }]),
+		)
 	})
 
 	it('asks for nothing on a signed-out list', async () => {
@@ -133,8 +190,8 @@ describe('list merge conflicts', () => {
 		const now = Date.now()
 		await fakeBrowser.storage.local.set({
 			[CONFLICTS_KEY]: {
-				'o/r/1': { hasConflicts: true, at: now - 1000 },
-				'o/r/2': { hasConflicts: true, at: now - CONFLICTS_TTL_MILLISECONDS - 1 },
+				'o/r/1': { state: 'conflicts', at: now - 1000 },
+				'o/r/2': { state: 'conflicts', at: now - CONFLICTS_TTL_MILLISECONDS - 1 },
 			},
 		})
 		renderList([{ number: 1 }, { number: 2 }])
@@ -142,9 +199,7 @@ describe('list merge conflicts', () => {
 		await mount()
 
 		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
-		await vi.waitFor(async () =>
-			expect((await readConflictsCache())['o/r/2']?.hasConflicts).toBe(false),
-		)
+		await vi.waitFor(async () => expect((await readConflictsCache())['o/r/2']?.state).toBe('clean'))
 		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
 		expect(mergeBoxCalls(fetch)).toEqual([2])
 	})
@@ -152,7 +207,7 @@ describe('list merge conflicts', () => {
 	it('drops a stale conflict when GitHub now answers unknown', async () => {
 		await fakeBrowser.storage.local.set({
 			[CONFLICTS_KEY]: {
-				'o/r/1': { hasConflicts: true, at: Date.now() - CONFLICTS_TTL_MILLISECONDS },
+				'o/r/1': { state: 'conflicts', at: Date.now() - CONFLICTS_TTL_MILLISECONDS },
 			},
 		})
 		renderList([{ number: 1 }])

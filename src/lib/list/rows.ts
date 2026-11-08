@@ -1,8 +1,24 @@
+import type { ConflictState } from './conflicts'
 import { type DiffStats, formatCount, formatFiles } from './stats'
 
 export const STATS_ATTRIBUTE = 'data-detent-diff-stats'
 export const CONFLICTS_ATTRIBUTE = 'data-detent-conflicts'
 export const CONFLICTS_TITLE = 'This branch has conflicts with the base branch'
+export const REBASE_BLOCKED_TITLE =
+	'This branch can be merged, but not rebased onto its base without conflicts'
+
+export type ConflictMarker = Extract<ConflictState, 'conflicts' | 'rebase-blocked'>
+
+// A merge conflict is red like GitHub's own; a blocked rebase only stops one merge method, so it takes the
+// attention tone GitHub gives a branch that needs a rebase.
+const MARKERS: Record<ConflictMarker, { text: string; title: string; className: string }> = {
+	conflicts: { text: 'Conflicts', title: CONFLICTS_TITLE, className: 'fgColor-danger' },
+	'rebase-blocked': {
+		text: "Can't rebase",
+		title: REBASE_BLOCKED_TITLE,
+		className: 'fgColor-attention',
+	},
+}
 
 export interface PullsListLocation {
 	owner: string
@@ -114,21 +130,23 @@ export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): v
 	settle(meta)
 }
 
-/** Marks a row whose branch conflicts with its base; there is no marker for a clean one. */
-export function renderConflicts(meta: HTMLElement): void {
+/** Marks a row whose branch conflicts with its base, or cannot be rebased onto it; a clean one has no marker. */
+export function renderConflicts(meta: HTMLElement, state: ConflictMarker): void {
 	const existing = meta.querySelector<HTMLElement>(`:scope > [${CONFLICTS_ATTRIBUTE}]`)
-	if (existing) {
+	if (existing?.getAttribute(CONFLICTS_ATTRIBUTE) === state) {
 		settle(meta)
 		return
 	}
 
+	const { text, title, className } = MARKERS[state]
 	const element = document.createElement('span')
-	element.setAttribute(CONFLICTS_ATTRIBUTE, '')
-	element.title = CONFLICTS_TITLE
+	element.setAttribute(CONFLICTS_ATTRIBUTE, state)
+	element.title = title
 	element.style.cssText = 'display:inline-flex;gap:4px;margin-left:4px;white-space:nowrap'
-	element.append(span('·'), span('Conflicts', 'fgColor-danger'))
+	element.append(span('·'), span(text, className))
 	element.firstElementChild?.setAttribute('aria-hidden', 'true')
-	meta.append(element)
+	if (existing) existing.replaceWith(element)
+	else meta.append(element)
 	settle(meta)
 }
 
