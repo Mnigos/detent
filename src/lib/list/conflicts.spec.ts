@@ -54,7 +54,7 @@ describe('parseMergeBox', () => {
 	})
 
 	it('reads a failed conflict condition without conflicting files as a blocked rebase', () => {
-		for (const status of ['CLEAN', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'HAS_HOOKS']) {
+		for (const status of ['CLEAN', 'BLOCKED', 'UNSTABLE', 'HAS_HOOKS']) {
 			const body = mergeBox({ state: 'OPEN', mergeStateStatus: status }, [
 				conflictCondition('FAILED'),
 			])
@@ -64,6 +64,15 @@ describe('parseMergeBox', () => {
 			{ type: 'PULL_REQUEST_MERGE_CONFLICT_STATE', result: 'FAILED' },
 		])
 		expect(parseMergeBox(withoutList)).toBe('rebase-blocked')
+	})
+
+	it('leaves a branch that must be updated first unmarked, as GitHub only says it is out of date', () => {
+		for (const conflicts of [[], ['src/index.ts']]) {
+			const body = mergeBox({ state: 'OPEN', mergeStateStatus: 'BEHIND' }, [
+				conflictCondition('FAILED', conflicts),
+			])
+			expect(parseMergeBox(body)).toBe('clean')
+		}
 	})
 
 	it('shows a blocked rebase only where the repository offers rebase merging', () => {
@@ -103,10 +112,12 @@ describe('parseMergeBox', () => {
 
 	it('answers unknown while GitHub computes the state or the shape is not the merge box', () => {
 		expect(parseMergeBox(mergeBox({ state: 'OPEN', mergeStateStatus: 'UNKNOWN' }))).toBe('unknown')
-		const pending = mergeBox({ state: 'OPEN', mergeStateStatus: 'UNKNOWN' }, [
-			conflictCondition('FAILED'),
-		])
-		expect(parseMergeBox(pending)).toBe('unknown')
+		for (const conflicts of [[], ['src/index.ts']]) {
+			const pending = mergeBox({ state: 'OPEN', mergeStateStatus: 'UNKNOWN' }, [
+				conflictCondition('FAILED', conflicts),
+			])
+			expect(parseMergeBox(pending)).toBe('unknown')
+		}
 		expect(parseMergeBox(mergeBox({ state: 'OPEN' }))).toBe('unknown')
 		expect(parseMergeBox({ error: 'Not Found' })).toBe('unknown')
 		expect(parseMergeBox(null)).toBe('unknown')

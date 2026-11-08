@@ -116,8 +116,9 @@ Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack
   `if("BEHIND"===t)return"OUT_OF_DATE";if("UNKNOWN"===t)return"PENDING";if("FAILED"===n.result&&0===s.length)return"HAS_REBASE_CONFLICTS";`
   … `"DIRTY"===t&&"FAILED"===n.result` → `"HAS_CONFLICTS"`, with `t` the merge state status, `n` the conflict
   condition and `s` its `conflicts` list. `HAS_REBASE_CONFLICTS` is the heading "This branch cannot be rebased due
-  to conflicts". detent reads `DIRTY`, or a failed condition with conflicting files, as **Conflicts**; a failed
-  condition with no conflicting files (and a computed status) as **Can't rebase**. `DIRTY` is GraphQL's status
+  to conflicts". detent keeps that order: `DIRTY` is **Conflicts**, `UNKNOWN` asks again later, `BEHIND` (GitHub
+  says only "out of date") gets no marker; otherwise a failed condition with conflicting files is **Conflicts** and
+  one with none is **Can't rebase**. `DIRTY` is GraphQL's status
   for the merge commit, which does not take the method, so asking for `REBASE` still finds real conflicts.
 - Merge methods: `pullRequest.viewerMergeActions[]` (`name`: `DIRECT_MERGE`, `AUTO_MERGE`, `MERGE_QUEUE`) each carry
   `mergeMethods[]` of `{name: "MERGE"|"SQUASH"|"REBASE", allowableStatus}`. The merge button offers a method when
