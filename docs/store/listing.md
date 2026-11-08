@@ -33,7 +33,8 @@ starts folded.
 
 Diff size and conflicts on pull request lists. On a repository's pull request list every row shows
 +additions −deletions · N files, and a red Conflicts marker on an open pull request whose branch
-conflicts with its base (signed in to GitHub).
+conflicts with its base, or an orange Can't rebase one when it merges but would not rebase cleanly
+(signed in to GitHub).
 
 On the pull request page:
 
@@ -74,7 +75,7 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
   deletions and files. On those lists the content script also reads, with the user's GitHub
   session, the merge box state GitHub's own page loads from
   `https://github.com/<owner>/<repo>/pull/<number>/page_data/merge_box`, to mark pull requests with
-  merge conflicts.
+  merge conflicts or a blocked rebase.
 - **Host permission `https://patch-diff.githubusercontent.com/*`**: GitHub redirects those diff
   downloads to this host, which sends no CORS headers for the page, so the service worker follows
   the redirect itself.
