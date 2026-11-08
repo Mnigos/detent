@@ -98,14 +98,34 @@ Read before anything heavy runs, to decide whether detent waits for a click (`sr
 Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack/router`, where the REST API reported
 #8842 and #8829 as `mergeable: false, mergeable_state: "dirty"`.
 
-- Source: `GET https://github.com/<owner>/<repo>/pull/<n>/page_data/merge_box`, the JSON GitHub's React merge box
-  loads (route name `mergeBox: "merge_box"` in the PR page bundle; GitHub adds `?merge_method=…&bypass_requirements=…`,
-  detent omits them). The bundle reads `pullRequest.state`, `pullRequest.mergeStateStatus` (GraphQL
-  `MergeStateStatus`: `DIRTY` is a conflict, `UNKNOWN` still computing), `pullRequest.headRefOid`/`baseRefName`, and
-  `mergeRequirements.conditions[]` with `type: "PULL_REQUEST_MERGE_CONFLICT_STATE"` and `result: "FAILED"` for a
-  conflict. detent marks a row on `DIRTY` or that failed condition. The response shape comes from reading the
-  bundle; the endpoint answers `404 {"error":"Not Found"}` to a signed-out visitor, so it is not yet checked against a
-  real signed-in answer.
+- Source: `GET https://github.com/<owner>/<repo>/pull/<n>/page_data/merge_box?merge_method=REBASE&bypass_requirements=false`,
+  the JSON GitHub's React merge box loads (route name `mergeBox: "merge_box"` in the PR page bundle). The bundle
+  reads `pullRequest.state`, `pullRequest.mergeStateStatus` (GraphQL `MergeStateStatus`: `DIRTY` is a conflict,
+  `UNKNOWN` still computing), `pullRequest.headRefOid`/`baseRefName`, and `mergeRequirements.conditions[]` with
+  `type: "PULL_REQUEST_MERGE_CONFLICT_STATE"`, `result` and a `conflicts` list of files. The response shape comes
+  from reading the bundle; the endpoint answers `404 {"error":"Not Found"}` to a signed-out visitor, so it is not yet
+  checked against a real signed-in answer.
+- The query matters. The merge box hook builds it as
+  `e.append("merge_method",g),e.append("bypass_requirements",f.toString())` with `g` the method selected in the
+  merge box, which starts at the page payload's `defaultMergeMethod` (`"SQUASH"` on `Mnigos/detent`, present even
+  signed out; `MERGE` when that is missing). Changing the method invalidates the merge box query and asks again, so
+  the server checks the conflict condition for the asked method. detent first asked without the parameter and showed
+  nothing on a `Mnigos/soonlane` pull request where GitHub said "This branch cannot be rebased due to conflicts"
+  (the answer itself was not captured), so detent now always asks for `REBASE`.
+- Rebase: the conflicts section of the bundle (`44-*.js` on github.githubassets.com, checked 2026-11-09) decides
+  `if("BEHIND"===t)return"OUT_OF_DATE";if("UNKNOWN"===t)return"PENDING";if("FAILED"===n.result&&0===s.length)return"HAS_REBASE_CONFLICTS";`
+  … `"DIRTY"===t&&"FAILED"===n.result` → `"HAS_CONFLICTS"`, with `t` the merge state status, `n` the conflict
+  condition and `s` its `conflicts` list. `HAS_REBASE_CONFLICTS` is the heading "This branch cannot be rebased due
+  to conflicts". detent reads `DIRTY`, or a failed condition with conflicting files, as **Conflicts**; a failed
+  condition with no conflicting files (and a computed status) as **Can't rebase**. `DIRTY` is GraphQL's status
+  for the merge commit, which does not take the method, so asking for `REBASE` still finds real conflicts.
+- Merge methods: `pullRequest.viewerMergeActions[]` (`name`: `DIRECT_MERGE`, `AUTO_MERGE`, `MERGE_QUEUE`) each carry
+  `mergeMethods[]` of `{name: "MERGE"|"SQUASH"|"REBASE", allowableStatus}`. The merge button offers a method when
+  its status is `ALLOWED` or `ALLOWED_WITH_BYPASS`; the update branch menu also lists `UNAVAILABLE` ones, greyed out
+  with "This branch cannot be rebased at this time.". A `PULL_REQUEST_MERGE_METHOD` condition is among the
+  repository-level requirements that fail. detent hides **Can't rebase** when that condition failed or when the
+  listed methods have no `REBASE` in one of those three statuses; with no methods listed (a viewer who cannot merge)
+  it shows the marker. Which status a repository with rebase merging turned off reports is not checked.
 - Signed out: the PR page renders no merge box ("Sign up for free to join this conversation"), the embedded React
   data carries only live-update channel names (`mergeboxChannels`, `gitMergeStateChannel`), the hovercard
   (`/pull/<n>/hovercard`, 5 KB) and the list page's own payload say nothing about conflicts, and `merge_box`,
