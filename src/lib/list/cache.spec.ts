@@ -29,7 +29,7 @@ describe('isFresh', () => {
 	})
 
 	it('keeps a conflict state for five minutes only', () => {
-		const conflict = { hasConflicts: true, at: 0 }
+		const conflict = { state: 'conflicts' as const, at: 0 }
 
 		expect(CONFLICTS_TTL_MILLISECONDS).toBe(5 * 60 * 1000)
 		expect(isFresh(conflict, CONFLICTS_TTL_MILLISECONDS - 1, CONFLICTS_TTL_MILLISECONDS)).toBe(true)
@@ -60,16 +60,28 @@ describe('storage', () => {
 	it('keeps conflict states apart from the diff stats', async () => {
 		await fakeBrowser.storage.local.set({
 			[CONFLICTS_KEY]: {
-				'o/r/1': { hasConflicts: true, at: 1 },
-				bad: { hasConflicts: 'yes', at: 1 },
+				'o/r/1': { state: 'conflicts', at: 1 },
+				'o/r/3': { state: 'rebase-blocked', at: 3 },
+				bad: { state: 'unknown', at: 1 },
 			},
 		})
-		await writeConflictsEntry('o/r/2', { hasConflicts: false, at: 2 })
+		await writeConflictsEntry('o/r/2', { state: 'clean', at: 2 })
 
 		await expect(readConflictsCache()).resolves.toEqual({
-			'o/r/1': { hasConflicts: true, at: 1 },
-			'o/r/2': { hasConflicts: false, at: 2 },
+			'o/r/1': { state: 'conflicts', at: 1 },
+			'o/r/2': { state: 'clean', at: 2 },
+			'o/r/3': { state: 'rebase-blocked', at: 3 },
 		})
 		await expect(readStatsCache()).resolves.toEqual({})
+	})
+
+	it('keeps conflict states under a key of their own shape and ignores the boolean entries before it', async () => {
+		expect(CONFLICTS_KEY).toBe('mergeConflicts:v2')
+		await fakeBrowser.storage.local.set({
+			mergeConflicts: { 'o/r/1': { hasConflicts: true, at: 1 } },
+			[CONFLICTS_KEY]: { 'o/r/2': { hasConflicts: true, at: 2 } },
+		})
+
+		await expect(readConflictsCache()).resolves.toEqual({})
 	})
 })

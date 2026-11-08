@@ -114,7 +114,8 @@ export async function startListStats() {
 			// A stale state is as good as unknown: the base may have moved since.
 			const conflict = conflicts[key]
 			const isConflictFresh = isFresh(conflict, now, CONFLICTS_TTL_MILLISECONDS)
-			if (row.isOpen && isConflictFresh && conflict?.hasConflicts) renderConflicts(row.meta)
+			if (row.isOpen && isConflictFresh && conflict && conflict.state !== 'clean')
+				renderConflicts(row.meta, conflict.state)
 			else clearConflicts(row.meta)
 			if (
 				canAskConflicts &&
@@ -168,7 +169,7 @@ export async function startListStats() {
 		}
 
 		unknownUntil.delete(key)
-		const entry: ConflictsEntry = { hasConflicts: state === 'conflicts', at: Date.now() }
+		const entry: ConflictsEntry = { state, at: Date.now() }
 		conflicts[key] = entry
 		await writeConflictsEntry(key, entry).catch((error: unknown) => console.warn('[detent]', error))
 		if (!isStopped) apply()
