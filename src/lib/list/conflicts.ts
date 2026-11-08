@@ -40,7 +40,8 @@ function offersRebase(pullRequest: Record<string, unknown>, conditions: Record<s
  * `pullRequest.mergeStateStatus` is GraphQL's MergeStateStatus: DIRTY means the merge commit cannot be created
  * cleanly, UNKNOWN that GitHub is still computing it. The conflict condition is checked for the asked merge
  * method: failed with conflicting files it is a merge conflict, failed without any it is GitHub's
- * "This branch cannot be rebased due to conflicts". A closed or merged pull request counts as clean.
+ * "This branch cannot be rebased due to conflicts". Like GitHub's merge box, BEHIND (the branch must be updated
+ * before it merges at all) wins over the condition. A closed or merged pull request counts as clean.
  */
 export function parseMergeBox(body: unknown): ConflictState {
 	const pullRequest = isRecord(body) && isRecord(body.pullRequest) ? body.pullRequest : undefined
@@ -54,10 +55,11 @@ export function parseMergeBox(body: unknown): ConflictState {
 	const failed = conditions.find(
 		(condition) => condition.type === CONFLICT_CONDITION && condition.result === 'FAILED',
 	)
-	const hasConflictingFiles = Array.isArray(failed?.conflicts) && failed.conflicts.length > 0
-	if (status === 'DIRTY' || hasConflictingFiles) return 'conflicts'
+	if (status === 'DIRTY') return 'conflicts'
 	if (typeof status !== 'string' || status === 'UNKNOWN') return 'unknown'
-	if (failed && offersRebase(pullRequest, conditions)) return 'rebase-blocked'
+	if (status === 'BEHIND' || !failed) return 'clean'
+	if (Array.isArray(failed.conflicts) && failed.conflicts.length > 0) return 'conflicts'
+	if (offersRebase(pullRequest, conditions)) return 'rebase-blocked'
 
 	return 'clean'
 }
