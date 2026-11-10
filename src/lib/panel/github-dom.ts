@@ -46,7 +46,13 @@ export const markOwnHash = (anchorId: string) => {
 	ownHash = `#${anchorId}`
 }
 
-export const isOwnHash = (hash: string) => hash === ownHash
+/** Whether detent set this hash itself. The mark is spent on the first check: the URL moved on. */
+export function takeOwnHash(hash: string): boolean {
+	const isOwn = hash === ownHash
+	ownHash = undefined
+
+	return isOwn
+}
 
 export async function anchorIdForPath(path: string): Promise<string> {
 	const cached = anchorIds.get(path)

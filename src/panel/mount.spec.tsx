@@ -3,6 +3,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import { anchorIdForPath } from '../lib/panel/github-dom'
+import { holdReviewAnchor, releaseReviewAnchor } from '../lib/panel/review-anchor'
 import { createReviewSession } from '../lib/panel/session'
 import { createPanelStore, currentFile, type PanelStore } from '../lib/panel/store'
 import { HANDLER_SPEC, LAYERS } from '../test/changes-page'
@@ -53,6 +54,8 @@ async function loadFilesPage(hash: string) {
 		)
 		.join('')}</div>`
 	window.location.hash = hash
+	// github.content.ts holds the link's target before it starts a view.
+	holdReviewAnchor()
 	store = createPanelStore(LAYERS, { status: 'Ready', savePosition: vi.fn() })
 	vi.mocked(createReviewSession).mockResolvedValue({ store, anchorIds, stop: vi.fn() })
 
@@ -80,6 +83,7 @@ beforeEach(() => {
 afterEach(async () => {
 	await act(async () => panel?.remove())
 	panel = undefined
+	releaseReviewAnchor()
 	window.location.hash = ''
 	vi.useRealTimers()
 	vi.unstubAllGlobals()

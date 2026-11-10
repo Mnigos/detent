@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ContentScriptContext } from 'wxt/utils/content-script-context'
+import { holdReviewAnchor, releaseReviewAnchor } from '../lib/panel/review-anchor'
 import { createReviewSession } from '../lib/panel/session'
 import { STATUS_LINES } from '../lib/panel/status'
 import { createPanelStore, currentFile, type PanelLayer } from '../lib/panel/store'
@@ -35,6 +36,7 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+	releaseReviewAnchor()
 	tree.remove()
 	ctx.abort()
 	vi.clearAllTimers()
@@ -43,13 +45,15 @@ afterEach(() => {
 	vi.restoreAllMocks()
 })
 
-async function mountAt(hash: string) {
+async function mountAt(hash: string, { hold = true } = {}) {
 	tree.remove()
 	const { anchorIds } = await loadChangesPage()
 	const comment = document.createElement('div')
 	comment.id = 'r42'
 	document.getElementById(HANDLER_SPEC_ANCHOR)?.append(comment)
 	window.location.hash = hash
+	// github.content.ts holds the link's target before it starts a view.
+	if (hold) holdReviewAnchor()
 	store = createPanelStore(LAYERS, { status: 'Ready', savePosition: vi.fn() })
 	vi.mocked(createReviewSession).mockResolvedValue({ store, anchorIds, stop: vi.fn() })
 	tree = await startTree(ctx, { owner: 'owner', repo: 'repo', number: 1, tab: 'changes' })
@@ -107,6 +111,18 @@ describe('a followed review link', () => {
 		await vi.advanceTimersByTimeAsync(50)
 
 		expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
+	})
+
+	it('lets go when the reviewer scrolled while the diff was loading', async () => {
+		placeOnPage([['r42', 5000]])
+		tree.remove()
+		window.location.hash = '#r42'
+		holdReviewAnchor()
+		window.dispatchEvent(new Event('wheel'))
+		await mountAt('#r42', { hold: false })
+
+		expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+		expect(currentFile(store.getSnapshot())?.path).not.toBe(HANDLER_SPEC)
 	})
 
 	it('picks the linked file over the first unviewed layer and keeps a file in view still', async () => {

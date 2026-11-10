@@ -15,7 +15,11 @@ import {
 	toggleViewed,
 } from '@/src/lib/panel/github-dom'
 import { panelKeyAction } from '@/src/lib/panel/keys'
-import { anchorPosition, onFirstUserInput, readReviewAnchor } from '@/src/lib/panel/review-anchor'
+import {
+	anchorPosition,
+	heldReviewAnchor,
+	releaseReviewAnchor,
+} from '@/src/lib/panel/review-anchor'
 import { createReviewSession } from '@/src/lib/panel/session'
 import { STATUS_LINES } from '@/src/lib/panel/status'
 import { currentFile, isLayerComplete } from '@/src/lib/panel/store'
@@ -54,13 +58,13 @@ export async function startPanel(ctx: ContentScriptContext, location: PullReques
 
 	// A followed link selects its file once the page shows which one it is. GitHub scrolls to the
 	// target and the panel never reorders the page, so the viewport stays where GitHub put it.
-	let anchor = readReviewAnchor()
 	function followAnchor() {
 		const state = store.getSnapshot()
+		const anchor = heldReviewAnchor()
 		const target = anchor && anchorPosition(anchor, state, anchorIds)
 		if (!target) return
 
-		anchor = undefined
+		releaseReviewAnchor()
 		position = state.layers[target.layerIndex]?.files[target.fileIndex]?.path
 		store.dispatch({ type: 'select', ...target })
 	}
@@ -114,9 +118,6 @@ export async function startPanel(ctx: ContentScriptContext, location: PullReques
 				syncFromPage()
 				followAnchor()
 			})
-			const stopAnchor = onFirstUserInput(() => {
-				anchor = undefined
-			})
 			const stopColorMode = observeColorMode((mode) =>
 				container.classList.toggle('dark', mode === 'dark'),
 			)
@@ -134,7 +135,6 @@ export async function startPanel(ctx: ContentScriptContext, location: PullReques
 			return () => {
 				unsubscribe()
 				stopViewed()
-				stopAnchor()
 				stopColorMode()
 				showAnalysisBadge(false)
 				showKeyBadge(false)

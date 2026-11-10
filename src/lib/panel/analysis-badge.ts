@@ -5,7 +5,7 @@ const SPINNER_STYLE =
 	'width:12px;height:12px;border-radius:50%;border:2px solid #9ca3af;border-top-color:transparent;animation:detent-spin .8s linear infinite'
 const STYLE_ID = `${BADGE_ID}-style`
 
-const GROUP_BUTTON_ID = 'detent-group'
+export const GROUP_BUTTON_ID = 'detent-group'
 const GROUP_BUTTON_STYLE = `${BADGE_STYLE};border:0;margin:0;cursor:pointer;text-align:left`
 const RING_STYLE = 'width:12px;height:12px;border-radius:50%;border:2px solid #9ca3af'
 
