@@ -13,6 +13,7 @@ const PULL_REQUEST_BODY = '[data-testid="pr-body"], .js-discussion .timeline-com
 const REVIEW_THREAD = '.js-inline-comments-container, .review-comment, .js-comment-review'
 const DOCUMENT_TITLE_SUFFIX = /(?: by \S+)? · Pull Request #\d+(?: · [^·]+)?(?: · GitHub)?\s*$/
 const anchorIds = new Map<string, string>()
+let ownHash: string | undefined
 
 const bodyIn = (root: ParentNode) =>
 	[...root.querySelectorAll(PULL_REQUEST_BODY)]
@@ -39,6 +40,13 @@ export async function fetchPullRequestBody(conversationUrl: string): Promise<str
 		return ''
 	}
 }
+
+/** detent makes GitHub load a file by setting its `#diff-` hash; that hash is no link anyone followed. */
+export const markOwnHash = (anchorId: string) => {
+	ownHash = `#${anchorId}`
+}
+
+export const isOwnHash = (hash: string) => hash === ownHash
 
 export async function anchorIdForPath(path: string): Promise<string> {
 	const cached = anchorIds.get(path)
@@ -199,6 +207,7 @@ export async function scrollToFile(path: string): Promise<void> {
 	const section = findFileSection(path, anchorId)
 	if (section) return scrollToSection(section)
 
+	markOwnHash(anchorId)
 	document.getElementById(`file-tree-item-${anchorId}`)?.querySelector('a')?.click()
 	await new Promise((resolve) => setTimeout(resolve, 300))
 	const loaded = findFileSection(path, anchorId)

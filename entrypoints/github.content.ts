@@ -9,6 +9,7 @@ import {
 } from '@/src/lib/panel/analysis-badge'
 import { observeMutations } from '@/src/lib/panel/github-dom'
 import { largePullRequestGate, saveGroupingConsent } from '@/src/lib/panel/large-pull-request'
+import { isStaleHash } from '@/src/lib/panel/review-anchor'
 import {
 	type PullRequestLocation,
 	parsePullRequestUrl,
@@ -50,6 +51,8 @@ export default defineContentScript({
 		let generation = 0
 		// The pull request page the button was shown for; leaving it removes the button at once.
 		let gated: PullRequestLocation | undefined
+		// Only the document's first pass can see a hash that a reload or a history step brought back.
+		let isFirstPass = true
 
 		// The header's code lines live per pull request, across its tabs, beside whichever view the tab has.
 		let header: { mount: () => void; remove: () => void } | undefined
@@ -108,11 +111,12 @@ export default defineContentScript({
 							? 'list'
 							: undefined
 			if (view && view !== 'list') {
-				// A #diff- hash left by an earlier visit would make GitHub scroll to that file at load.
-				if (window.location.hash.startsWith('#diff-'))
+				// A stale hash would make GitHub scroll to that file at load; a link just followed stays.
+				if (isStaleHash(window.location.hash, isFirstPass))
 					history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
 				history.scrollRestoration = 'manual'
 			}
+			isFirstPass = false
 			// A list keeps its view across filters and pages; its observer picks up the new rows.
 			const key =
 				view === 'list'
