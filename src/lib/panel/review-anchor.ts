@@ -39,8 +39,10 @@ export function parseReviewAnchor(hash: string): ReviewAnchor | undefined {
  * own file tree leaves such hashes behind; a comment hash only ever comes from a link.
  */
 export function isStaleHash(hash: string, isFirstPass: boolean): boolean {
+	// The mark is spent on every check, whatever the hash: once the URL moved on, it is no longer ours.
+	const isOwn = takeOwnHash(hash)
 	if (!parseReviewAnchor(hash)?.fileId) return false
-	if (takeOwnHash(hash)) return true
+	if (isOwn) return true
 	if (!isFirstPass) return false
 
 	const [entry] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
@@ -123,16 +125,21 @@ export function revealAnchor(anchor: ReviewAnchor): void {
 	else target.scrollIntoView({ block: 'center', behavior: 'instant' })
 }
 
-/**
- * Calls `onInput` once, the first time the reviewer scrolls, taps, clicks or types. The large pull
- * request button asks for grouping; pressing it does not leave the target.
- */
+// Pressing the large pull request button asks for grouping; it does not leave the target. A wheel
+// over the button or any other key while it has focus still does.
+const isGroupButtonPress = (event: Event) =>
+	event.target instanceof Element &&
+	event.target.closest(`#${GROUP_BUTTON_ID}`) !== null &&
+	(event.type === 'pointerdown' ||
+		(event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ')))
+
+/** Calls `onInput` once, the first time the reviewer scrolls, taps, clicks or types. */
 export function onFirstUserInput(onInput: () => void): () => void {
 	const stop = () => {
 		for (const type of USER_INPUT) window.removeEventListener(type, handle, true)
 	}
 	function handle(event: Event) {
-		if (event.target instanceof Element && event.target.closest(`#${GROUP_BUTTON_ID}`)) return
+		if (isGroupButtonPress(event)) return
 
 		stop()
 		onInput()
