@@ -15,6 +15,7 @@ import {
 	toggleViewed,
 } from '@/src/lib/panel/github-dom'
 import { panelKeyAction } from '@/src/lib/panel/keys'
+import { anchorPosition, onFirstUserInput, readReviewAnchor } from '@/src/lib/panel/review-anchor'
 import { createReviewSession } from '@/src/lib/panel/session'
 import { STATUS_LINES } from '@/src/lib/panel/status'
 import { currentFile, isLayerComplete } from '@/src/lib/panel/store'
@@ -49,6 +50,19 @@ export async function startPanel(ctx: ContentScriptContext, location: PullReques
 
 		position = file?.path
 		if (file) void scrollToFile(file.path)
+	}
+
+	// A followed link selects its file once the page shows which one it is. GitHub scrolls to the
+	// target and the panel never reorders the page, so the viewport stays where GitHub put it.
+	let anchor = readReviewAnchor()
+	function followAnchor() {
+		const state = store.getSnapshot()
+		const target = anchor && anchorPosition(anchor, state, anchorIds)
+		if (!target) return
+
+		anchor = undefined
+		position = state.layers[target.layerIndex]?.files[target.fileIndex]?.path
+		store.dispatch({ type: 'select', ...target })
 	}
 
 	// A change event is the reviewer's own toggle; anything else is the page loading in.
@@ -96,9 +110,13 @@ export async function startPanel(ctx: ContentScriptContext, location: PullReques
 			}
 			document.addEventListener('keydown', onKeyDown, true)
 			document.addEventListener('change', syncFromPage, true)
-			const stopViewed = observeMutations(document.body, ['data-file-user-viewed'], () =>
-				syncFromPage(),
-			)
+			const stopViewed = observeMutations(document.body, ['data-file-user-viewed'], () => {
+				syncFromPage()
+				followAnchor()
+			})
+			const stopAnchor = onFirstUserInput(() => {
+				anchor = undefined
+			})
 			const stopColorMode = observeColorMode((mode) =>
 				container.classList.toggle('dark', mode === 'dark'),
 			)
@@ -109,12 +127,14 @@ export async function startPanel(ctx: ContentScriptContext, location: PullReques
 				showKeyBadge(store.getSnapshot().status === STATUS_LINES.missingKey)
 			})
 			syncFromPage()
+			followAnchor()
 			showAnalysisBadge(store.getSnapshot().isAnalyzing)
 			showKeyBadge(store.getSnapshot().status === STATUS_LINES.missingKey)
 
 			return () => {
 				unsubscribe()
 				stopViewed()
+				stopAnchor()
 				stopColorMode()
 				showAnalysisBadge(false)
 				showKeyBadge(false)

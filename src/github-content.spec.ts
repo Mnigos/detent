@@ -2,6 +2,7 @@
 // @vitest-environment-options {"url":"https://github.com/example/shop/pull/1/files"}
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import githubContent from '../entrypoints/github.content'
+import { isOwnHash } from './lib/panel/github-dom'
 import { largePullRequestGate, saveGroupingConsent } from './lib/panel/large-pull-request'
 import { readSettings, type Settings } from './lib/settings'
 import { startPanel } from './panel/mount'
@@ -14,7 +15,7 @@ vi.mock('./lib/panel/large-pull-request', () => ({
 	largePullRequestGate: vi.fn(),
 	saveGroupingConsent: vi.fn(),
 }))
-vi.mock('./lib/panel/github-dom', () => ({ observeMutations: vi.fn() }))
+vi.mock('./lib/panel/github-dom', () => ({ observeMutations: vi.fn(), isOwnHash: vi.fn() }))
 vi.mock('./panel/mount', () => ({ startPanel: vi.fn() }))
 vi.mock('./tree/mount', () => ({ startTree: vi.fn() }))
 vi.mock('./list/mount', () => ({ startListStats: vi.fn() }))
@@ -82,5 +83,61 @@ describe('large pull request button', () => {
 			expect.any(Function),
 		)
 		expect(groupButton()).not.toBeNull()
+	})
+})
+
+describe('hash on the files page', () => {
+	const FILE = `diff-${'c'.repeat(64)}`
+	const navigationType = (type: NavigationTimingType) =>
+		vi
+			.spyOn(performance, 'getEntriesByType')
+			.mockReturnValue([{ type } as PerformanceNavigationTiming])
+
+	beforeEach(() => {
+		vi.mocked(largePullRequestGate).mockResolvedValue(undefined)
+	})
+
+	it.each([`#${FILE}R25`, `#${FILE}`, '#r4479369071', '#discussion_r4479369071'])(
+		'keeps %s, a link the reviewer just followed',
+		async (hash) => {
+			navigationType('navigate')
+			history.replaceState(null, '', `/example/shop/pull/1/files${hash}`)
+			githubContent.main({} as never)
+			await flush()
+
+			expect(window.location.hash).toBe(hash)
+			expect(startPanel).toHaveBeenCalled()
+		},
+	)
+
+	it('drops a #diff- hash a reload brought back, but not one clicked on the page later', async () => {
+		navigationType('reload')
+		history.replaceState(null, '', `/example/shop/pull/1/files#${FILE}`)
+		githubContent.main({} as never)
+		await flush()
+		expect(window.location.hash).toBe('')
+
+		navigate(`/example/shop/pull/1/changes#${FILE}R3`)
+		await flush()
+		expect(window.location.hash).toBe(`#${FILE}R3`)
+	})
+
+	it('keeps a comment hash a reload brought back', async () => {
+		navigationType('reload')
+		history.replaceState(null, '', '/example/shop/pull/1/files#r4479369071')
+		githubContent.main({} as never)
+		await flush()
+
+		expect(window.location.hash).toBe('#r4479369071')
+	})
+
+	it('drops the #diff- hash detent set itself', async () => {
+		navigationType('navigate')
+		vi.mocked(isOwnHash).mockReturnValue(true)
+		history.replaceState(null, '', `/example/shop/pull/1/files#${FILE}`)
+		githubContent.main({} as never)
+		await flush()
+
+		expect(window.location.hash).toBe('')
 	})
 })

@@ -43,6 +43,92 @@ afterEach(() => {
 	vi.restoreAllMocks()
 })
 
+async function mountAt(hash: string) {
+	tree.remove()
+	const { anchorIds } = await loadChangesPage()
+	const comment = document.createElement('div')
+	comment.id = 'r42'
+	document.getElementById(HANDLER_SPEC_ANCHOR)?.append(comment)
+	window.location.hash = hash
+	store = createPanelStore(LAYERS, { status: 'Ready', savePosition: vi.fn() })
+	vi.mocked(createReviewSession).mockResolvedValue({ store, anchorIds, stop: vi.fn() })
+	tree = await startTree(ctx, { owner: 'owner', repo: 'repo', number: 1, tab: 'changes' })
+	tree.mount()
+	await vi.advanceTimersByTimeAsync(50)
+}
+
+let tops = new Map<string, number>()
+
+// Elements sit where `tops` says; scrolling one into view moves it on screen.
+function placeOnPage(placed: [string, number][]) {
+	tops = new Map(placed)
+	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		const top = tops.get(this.id) ?? 2000
+		return { top, bottom: top + 100 } as DOMRect
+	})
+}
+
+describe('a followed review link', () => {
+	beforeEach(() => {
+		Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+			tops.set(this.id, 300)
+		})
+	})
+
+	it('selects the commented file and brings the comment back after every reorder', async () => {
+		placeOnPage([['r42', 5000]])
+		await mountAt('#r42')
+
+		expect(currentFile(store.getSnapshot())?.path).toBe(HANDLER_SPEC)
+		expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
+		expect(window.location.hash).toBe('#r42')
+
+		// The model's groups reorder the page; the comment is pulled back on screen and stays current.
+		tops.set('r42', 7000)
+		store.dispatch({ type: 'labels', layers: [...LAYERS].reverse(), status: 'Regrouped' })
+		await vi.advanceTimersByTimeAsync(50)
+		expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(2)
+		expect(currentFile(store.getSnapshot())?.path).toBe(HANDLER_SPEC)
+
+		// A reorder that leaves the comment on screen leaves the viewport alone.
+		store.dispatch({ type: 'labels', layers: LAYERS, status: 'Regrouped again' })
+		await vi.advanceTimersByTimeAsync(50)
+		expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(2)
+	})
+
+	it('lets go once the reviewer scrolls', async () => {
+		placeOnPage([['r42', 5000]])
+		await mountAt('#r42')
+		window.dispatchEvent(new Event('wheel'))
+		tops.set('r42', 7000)
+		store.dispatch({ type: 'labels', layers: [...LAYERS].reverse(), status: 'Regrouped' })
+		await vi.advanceTimersByTimeAsync(50)
+
+		expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
+	})
+
+	it('picks the linked file over the first unviewed layer and keeps a file in view still', async () => {
+		placeOnPage([[HANDLER_SPEC_ANCHOR, 300]])
+		await mountAt(`#${HANDLER_SPEC_ANCHOR}R12`)
+
+		expect(store.getSnapshot()).toMatchObject({ layerIndex: 1, fileIndex: 3 })
+		expect(window.scrollTo).not.toHaveBeenCalled()
+		expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+	})
+
+	it('scrolls to a linked file the reorder moved away', async () => {
+		vi.stubGlobal('scrollY', 100)
+		placeOnPage([])
+		await mountAt(`#${HANDLER_SPEC_ANCHOR}`)
+
+		expect(currentFile(store.getSnapshot())?.path).toBe(HANDLER_SPEC)
+		// 2000 + scrollY 100 - the 60px header fallback - 8.
+		expect(window.scrollTo).toHaveBeenCalledWith({ top: 2032, behavior: 'instant' })
+	})
+})
+
 describe('tree and diff integration', () => {
 	it('defers restored Priority ranking while Files is visible and r returns to Priority', async () => {
 		tree.remove()

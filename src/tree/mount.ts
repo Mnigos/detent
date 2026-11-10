@@ -3,6 +3,12 @@ import { LOADING_TEXT, showAnalysisBadge, showKeyBadge } from '@/src/lib/panel/a
 import { observeMutations, stickyHeaderHeight } from '@/src/lib/panel/github-dom'
 import { toggleHideTests } from '@/src/lib/panel/hide-tests'
 import { panelKeyAction } from '@/src/lib/panel/keys'
+import {
+	anchorPosition,
+	onFirstUserInput,
+	readReviewAnchor,
+	revealAnchor,
+} from '@/src/lib/panel/review-anchor'
 import { createReviewSession } from '@/src/lib/panel/session'
 import { STATUS_LINES } from '@/src/lib/panel/status'
 import { currentFile, isLayerComplete, type ViewMode } from '@/src/lib/panel/store'
@@ -145,11 +151,24 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 		if (anchorId) scrollToAnchor(anchorId)
 	}
 
+	// A followed link (a file, a line or a review comment) wins over the saved place until the reviewer
+	// scrolls, clicks or types: its file is the current one, and every reorder brings it back on screen.
+	let anchor = readReviewAnchor()
+	function followAnchor() {
+		if (!anchor) return
+
+		revealAnchor(anchor)
+		selectQuietly(anchorPosition(anchor, store.getSnapshot(), anchorIds))
+	}
+
 	// The active layer never follows the scroll: it is the first layer with unviewed files, always at
 	// mount and again whenever the current layer is finished.
 	function settleOnViewed(force: boolean) {
 		const state = store.getSnapshot()
-		if (state.isRaw || (!force && !isLayerComplete(state.layers[state.layerIndex], state.viewed)))
+		if (
+			state.isRaw ||
+			(!force && (anchor || !isLayerComplete(state.layers[state.layerIndex], state.viewed)))
+		)
 			return
 
 		const layerIndex = state.layers.findIndex((layer) => !isLayerComplete(layer, state.viewed))
@@ -223,7 +242,13 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 			}
 			window.addEventListener('scroll', onScroll, { passive: true })
 			const stopDiffs = observeMutations(document.body, ['aria-pressed'], () => syncViewed())
-			const stopTree = observeMutations(document.body, [], () => applyTree(false))
+			const stopTree = observeMutations(document.body, [], () => {
+				applyTree(false)
+				followAnchor()
+			})
+			const stopAnchor = onFirstUserInput(() => {
+				anchor = undefined
+			})
 			let layers = store.getSnapshot().layers
 			const unsubscribe = store.subscribe(() => {
 				const state = store.getSnapshot()
@@ -234,17 +259,20 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 				// A regroup keeps the viewport where it is; the cursor follows the file on screen.
 				layers = state.layers
 				position = currentFile(state)?.path
-				selectQuietly(focusedFile())
+				if (anchor) followAnchor()
+				else selectQuietly(focusedFile())
 			})
 			rankWhenShown()
 			applyTree()
 			syncViewed(true)
-			// The page stays where the reviewer left it; github.content.ts handles the #diff- hash.
+			// The page stays where the reviewer left it, or on the target of the link that opened it.
 			position = currentFile(store.getSnapshot())?.path
+			followAnchor()
 
 			teardown = () => {
 				unsubscribe()
 				stopTree()
+				stopAnchor()
 				stopDiffs()
 				document.removeEventListener('keydown', onKeyDown, true)
 				document.removeEventListener('click', onClick, true)

@@ -1,4 +1,4 @@
-import { scrollToSection } from '../panel/github-dom'
+import { markOwnHash, scrollToSection } from '../panel/github-dom'
 
 const NATIVE_TREE = 'ul[role="tree"][aria-label="File Tree"]'
 const DIFFS_LIST = '[data-testid="progressive-diffs-list"]'
@@ -92,6 +92,7 @@ function navigateToAnchor(anchorId: string): void {
 
 		return
 	}
+	markOwnHash(anchorId)
 	window.location.hash = anchorId
 	requestAnimationFrame(() => {
 		if (window.location.hash !== `#${anchorId}`) return
