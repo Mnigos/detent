@@ -213,8 +213,11 @@ export async function scrollToFile(path: string): Promise<void> {
 	const section = findFileSection(path, anchorId)
 	if (section) return scrollToSection(section)
 
-	markOwnHash(anchorId)
-	document.getElementById(`file-tree-item-${anchorId}`)?.querySelector('a')?.click()
+	const link = document.getElementById(`file-tree-item-${anchorId}`)?.querySelector('a')
+	if (link) {
+		markOwnHash(anchorId)
+		link.click()
+	}
 	await new Promise((resolve) => setTimeout(resolve, 300))
 	const loaded = findFileSection(path, anchorId)
 	if (loaded) scrollToSection(loaded)

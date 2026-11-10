@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { markOwnHash } from './github-dom'
+import { anchorIdForPath, markOwnHash, scrollToFile } from './github-dom'
 import {
 	anchorFileId,
 	anchorPosition,
@@ -91,10 +91,17 @@ describe('isStaleHash', () => {
 		expect(isStaleHash(`#${OTHER}`, false)).toBe(false)
 	})
 
-	it('forgets its own hash once the URL moved on', () => {
+	it('marks nothing when the panel finds no file tree link to click', async () => {
+		navigationType('navigate')
+		const anchorId = await anchorIdForPath('not/on/the/page.ts')
+		await scrollToFile('not/on/the/page.ts')
+		expect(isStaleHash(`#${anchorId}`, false)).toBe(false)
+	})
+
+	it.each([`#${FILE}`, '#r42', ''])('forgets its own hash once the URL moved on to %j', (hash) => {
 		navigationType('navigate')
 		markOwnHash(OTHER)
-		expect(isStaleHash(`#${FILE}`, false)).toBe(false)
+		expect(isStaleHash(hash, false)).toBe(false)
 		expect(isStaleHash(`#${OTHER}`, false)).toBe(false)
 	})
 })
@@ -190,10 +197,27 @@ describe('holdReviewAnchor', () => {
 		holdReviewAnchor()
 
 		button.dispatchEvent(new Event('pointerdown', { bubbles: true }))
-		button.dispatchEvent(new Event('keydown', { bubbles: true }))
+		button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+		button.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
 		expect(heldReviewAnchor()).toBeDefined()
 		document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
 		expect(heldReviewAnchor()).toBeUndefined()
+		button.remove()
+	})
+
+	it.each([
+		['a wheel over the button', new Event('wheel', { bubbles: true })],
+		['PageDown on the button', new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true })],
+	])('lets go on %s', (_label, event) => {
+		const button = document.createElement('button')
+		button.id = 'detent-group'
+		document.body.append(button)
+		window.location.hash = '#r2'
+		holdReviewAnchor()
+
+		button.dispatchEvent(event)
+		expect(heldReviewAnchor()).toBeUndefined()
+		button.remove()
 	})
 
 	it('holds nothing for a hash that is no review link', () => {
