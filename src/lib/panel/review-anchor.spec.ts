@@ -4,9 +4,12 @@ import { markOwnHash } from './github-dom'
 import {
 	anchorFileId,
 	anchorPosition,
+	heldReviewAnchor,
+	holdReviewAnchor,
 	isStaleHash,
 	onFirstUserInput,
 	parseReviewAnchor,
+	releaseReviewAnchor,
 	revealAnchor,
 } from './review-anchor'
 import type { PanelLayer, PanelState } from './store'
@@ -46,7 +49,7 @@ describe('parseReviewAnchor', () => {
 	it.each([
 		[`#${FILE}`, { ids: [FILE], fileId: FILE }],
 		[`#${FILE}R25`, { ids: [`${FILE}R25`, FILE], fileId: FILE }],
-		[`#${FILE}L3-R7`, { ids: [`${FILE}L3-R7`, FILE], fileId: FILE }],
+		[`#${FILE}L3-R7`, { ids: [`${FILE}L3-R7`, `${FILE}L3`, FILE], fileId: FILE }],
 		['#r4479369071', { ids: ['r4479369071', 'discussion_r4479369071'] }],
 		['#discussion_r4479369071', { ids: ['discussion_r4479369071', 'r4479369071'] }],
 		['#pullrequestreview-12', { ids: ['pullrequestreview-12'] }],
@@ -84,7 +87,15 @@ describe('isStaleHash', () => {
 		navigationType('navigate')
 		markOwnHash(OTHER)
 		expect(isStaleHash(`#${OTHER}`, false)).toBe(true)
+		// The mark is spent: a link the reviewer follows to the same file later is kept.
+		expect(isStaleHash(`#${OTHER}`, false)).toBe(false)
+	})
+
+	it('forgets its own hash once the URL moved on', () => {
+		navigationType('navigate')
+		markOwnHash(OTHER)
 		expect(isStaleHash(`#${FILE}`, false)).toBe(false)
+		expect(isStaleHash(`#${OTHER}`, false)).toBe(false)
 	})
 })
 
@@ -139,12 +150,56 @@ describe('anchor targets', () => {
 		expect(line.scrollIntoView).toHaveBeenCalledTimes(2)
 	})
 
+	it('centres the first line of a range link', () => {
+		const line = document.getElementById(`${FILE}R25`) as HTMLElement
+		rectOf(line, 3000)
+		revealAnchor(parseReviewAnchor(`#${FILE}R25-R30`) as never)
+		expect(window.scrollTo).not.toHaveBeenCalled()
+		expect(line.scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'instant' })
+	})
+
 	it('puts a file under the sticky header, and falls back to the file for a missing line', () => {
 		rectOf(document.getElementById(FILE) as HTMLElement, 2000)
 		document.getElementById(`${FILE}R25`)?.remove()
 		revealAnchor(parseReviewAnchor(`#${FILE}R25`) as never)
 		// 2000 + scrollY 1000 - the 60px header fallback - 8.
 		expect(window.scrollTo).toHaveBeenCalledWith({ top: 2932, behavior: 'instant' })
+	})
+})
+
+describe('holdReviewAnchor', () => {
+	afterEach(() => {
+		releaseReviewAnchor()
+		window.location.hash = ''
+	})
+
+	it('holds the link target until the reviewer scrolls, even before a view mounts', () => {
+		window.location.hash = '#r2'
+		holdReviewAnchor()
+		expect(heldReviewAnchor()).toEqual({ ids: ['r2', 'discussion_r2'] })
+
+		window.dispatchEvent(new Event('wheel'))
+		expect(heldReviewAnchor()).toBeUndefined()
+	})
+
+	it('keeps the target through a press of the large pull request button', () => {
+		const button = document.createElement('button')
+		button.id = 'detent-group'
+		document.body.append(button)
+		window.location.hash = '#r2'
+		holdReviewAnchor()
+
+		button.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+		button.dispatchEvent(new Event('keydown', { bubbles: true }))
+		expect(heldReviewAnchor()).toBeDefined()
+		document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+		expect(heldReviewAnchor()).toBeUndefined()
+	})
+
+	it('holds nothing for a hash that is no review link', () => {
+		window.location.hash = '#readme'
+		holdReviewAnchor()
+		expect(heldReviewAnchor()).toBeUndefined()
 	})
 })
 

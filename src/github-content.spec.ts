@@ -2,7 +2,7 @@
 // @vitest-environment-options {"url":"https://github.com/example/shop/pull/1/files"}
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import githubContent from '../entrypoints/github.content'
-import { isOwnHash } from './lib/panel/github-dom'
+import { takeOwnHash } from './lib/panel/github-dom'
 import { largePullRequestGate, saveGroupingConsent } from './lib/panel/large-pull-request'
 import { readSettings, type Settings } from './lib/settings'
 import { startPanel } from './panel/mount'
@@ -15,7 +15,7 @@ vi.mock('./lib/panel/large-pull-request', () => ({
 	largePullRequestGate: vi.fn(),
 	saveGroupingConsent: vi.fn(),
 }))
-vi.mock('./lib/panel/github-dom', () => ({ observeMutations: vi.fn(), isOwnHash: vi.fn() }))
+vi.mock('./lib/panel/github-dom', () => ({ observeMutations: vi.fn(), takeOwnHash: vi.fn() }))
 vi.mock('./panel/mount', () => ({ startPanel: vi.fn() }))
 vi.mock('./tree/mount', () => ({ startTree: vi.fn() }))
 vi.mock('./list/mount', () => ({ startListStats: vi.fn() }))
@@ -131,7 +131,7 @@ describe('hash on the files page', () => {
 
 	it('drops the #diff- hash detent set itself', async () => {
 		navigationType('navigate')
-		vi.mocked(isOwnHash).mockReturnValue(true)
+		vi.mocked(takeOwnHash).mockReturnValue(true)
 		history.replaceState(null, '', `/example/shop/pull/1/files#${FILE}`)
 		githubContent.main({} as never)
 		await flush()

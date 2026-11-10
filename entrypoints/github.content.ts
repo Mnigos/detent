@@ -9,7 +9,7 @@ import {
 } from '@/src/lib/panel/analysis-badge'
 import { observeMutations } from '@/src/lib/panel/github-dom'
 import { largePullRequestGate, saveGroupingConsent } from '@/src/lib/panel/large-pull-request'
-import { isStaleHash } from '@/src/lib/panel/review-anchor'
+import { holdReviewAnchor, isStaleHash, releaseReviewAnchor } from '@/src/lib/panel/review-anchor'
 import {
 	type PullRequestLocation,
 	parsePullRequestUrl,
@@ -134,6 +134,8 @@ export default defineContentScript({
 			hideGroupButton()
 			document.getElementById(FAILURE_ID)?.remove()
 			showAnalysisBadge(Boolean(view) && view !== 'list', LOADING_TEXT)
+			if (view && view !== 'list') holdReviewAnchor()
+			else releaseReviewAnchor()
 			if (!view) return
 			if (view === 'list' || !location) return start(view, location, current)
 

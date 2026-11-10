@@ -3,12 +3,7 @@ import { LOADING_TEXT, showAnalysisBadge, showKeyBadge } from '@/src/lib/panel/a
 import { observeMutations, stickyHeaderHeight } from '@/src/lib/panel/github-dom'
 import { toggleHideTests } from '@/src/lib/panel/hide-tests'
 import { panelKeyAction } from '@/src/lib/panel/keys'
-import {
-	anchorPosition,
-	onFirstUserInput,
-	readReviewAnchor,
-	revealAnchor,
-} from '@/src/lib/panel/review-anchor'
+import { anchorPosition, heldReviewAnchor, revealAnchor } from '@/src/lib/panel/review-anchor'
 import { createReviewSession } from '@/src/lib/panel/session'
 import { STATUS_LINES } from '@/src/lib/panel/status'
 import { currentFile, isLayerComplete, type ViewMode } from '@/src/lib/panel/store'
@@ -153,8 +148,8 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 
 	// A followed link (a file, a line or a review comment) wins over the saved place until the reviewer
 	// scrolls, clicks or types: its file is the current one, and every reorder brings it back on screen.
-	let anchor = readReviewAnchor()
 	function followAnchor() {
+		const anchor = heldReviewAnchor()
 		if (!anchor) return
 
 		revealAnchor(anchor)
@@ -167,7 +162,8 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 		const state = store.getSnapshot()
 		if (
 			state.isRaw ||
-			(!force && (anchor || !isLayerComplete(state.layers[state.layerIndex], state.viewed)))
+			(!force &&
+				(heldReviewAnchor() || !isLayerComplete(state.layers[state.layerIndex], state.viewed)))
 		)
 			return
 
@@ -246,9 +242,6 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 				applyTree(false)
 				followAnchor()
 			})
-			const stopAnchor = onFirstUserInput(() => {
-				anchor = undefined
-			})
 			let layers = store.getSnapshot().layers
 			const unsubscribe = store.subscribe(() => {
 				const state = store.getSnapshot()
@@ -259,7 +252,7 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 				// A regroup keeps the viewport where it is; the cursor follows the file on screen.
 				layers = state.layers
 				position = currentFile(state)?.path
-				if (anchor) followAnchor()
+				if (heldReviewAnchor()) followAnchor()
 				else selectQuietly(focusedFile())
 			})
 			rankWhenShown()
@@ -272,7 +265,6 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 			teardown = () => {
 				unsubscribe()
 				stopTree()
-				stopAnchor()
 				stopDiffs()
 				document.removeEventListener('keydown', onKeyDown, true)
 				document.removeEventListener('click', onClick, true)
