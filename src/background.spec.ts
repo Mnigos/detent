@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { browser } from 'wxt/browser'
 import background from '../entrypoints/background'
+import { handleChatGptMessage, installCallbackRule } from './lib/chatgpt/background'
 import { fetchPullRequestDiff, PullRequestDiffError } from './lib/diff/fetch-diff'
 import { MergeBoxUnavailableError } from './lib/list/conflicts'
 import { resolveLayerLabels } from './lib/model/label-layers'
@@ -12,6 +13,10 @@ vi.mock('wxt/browser', () => ({
 		storage: { session: { setAccessLevel: vi.fn() }, local: { remove: vi.fn() } },
 		runtime: { onMessage: { addListener: vi.fn() }, onInstalled: { addListener: vi.fn() } },
 	},
+}))
+vi.mock('./lib/chatgpt/background', () => ({
+	handleChatGptMessage: vi.fn(() => false),
+	installCallbackRule: vi.fn(async () => undefined),
 }))
 vi.mock('./lib/diff/fetch-diff', () => ({
 	FETCH_DIFF_MESSAGE: 'detent:fetch-diff',
@@ -49,6 +54,8 @@ const request = {
 beforeEach(() => {
 	vi.resetAllMocks()
 	vi.mocked(browser.storage.session.setAccessLevel).mockResolvedValue(undefined)
+	vi.mocked(handleChatGptMessage).mockReturnValue(false)
+	vi.mocked(installCallbackRule).mockResolvedValue(undefined)
 	background.main()
 	listener = vi.mocked(browser.runtime.onMessage.addListener).mock.calls[0]?.[0] as Listener
 })
@@ -69,6 +76,18 @@ describe('background priorities message', () => {
 		onInstalled({ reason: 'update' })
 
 		expect(browser.storage.local.remove).toHaveBeenCalledExactlyOnceWith(['diffStats'])
+	})
+
+	it('sets the ChatGPT callback rule on start and lets ChatGPT messages answer first', () => {
+		expect(installCallbackRule).toHaveBeenCalledOnce()
+		vi.mocked(handleChatGptMessage).mockReturnValue(true)
+		const message = { type: 'detent:chatgpt:status' }
+		const sender = { id: 'detent' }
+		const reply = vi.fn()
+
+		expect(listener(message, sender, reply)).toBe(true)
+		expect(handleChatGptMessage).toHaveBeenCalledWith(message, sender, reply)
+		expect(resolvePriorities).not.toHaveBeenCalled()
 	})
 
 	it('keeps the channel open and sends exactly the asynchronous ranking answer', async () => {

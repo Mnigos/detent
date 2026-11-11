@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser'
+import { handleChatGptMessage, installCallbackRule } from '@/src/lib/chatgpt/background'
 import { createDiffRequests } from '@/src/lib/diff/diff-requests'
 import {
 	FETCH_DIFF_MESSAGE,
@@ -50,6 +51,8 @@ export default defineBackground(() => {
 	browser.storage.session
 		.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' })
 		.catch((error: unknown) => console.warn('[detent]', error))
+	// The ChatGPT sign-in callback must never reach 127.0.0.1; the rule is in place before any sign-in.
+	installCallbackRule().catch((error: unknown) => console.warn('[detent]', error))
 
 	browser.runtime.onInstalled.addListener(() => {
 		removeLegacyStatsCaches().catch((error: unknown) => console.warn('[detent]', error))
@@ -60,7 +63,8 @@ export default defineBackground(() => {
 	// A pull request's diff the page and its header ask for at the same time is downloaded once.
 	const diffs = createDiffRequests(list.diff)
 
-	browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+	browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+		if (handleChatGptMessage(message, sender, sendResponse)) return true
 		if (isRequest<FetchDiffRequest>(message, FETCH_DIFF_MESSAGE)) {
 			;(message.isList ? diffs.queued(message) : diffs.page(message))
 				.then((text) => sendResponse({ text } satisfies FetchDiffResponse))
