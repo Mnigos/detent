@@ -366,4 +366,51 @@ describe('completeSignIn', () => {
 		})
 		expect(account()).toBeUndefined()
 	})
+
+	it('revokes the saved and the issued refresh tokens before it drops another account', async () => {
+		vaultStore.set('account', {
+			clientId: 'oaiapp_issued',
+			subject: 'first-subject',
+			tokens: { idToken: 'id-0', accessToken: 'access-0', refreshToken: 'refresh-0', expiresAt: 0 },
+		})
+		await beginSignIn()
+		const { state } = pending()
+		answerTokens()
+
+		await expect(completeSignIn(callback({ code: 'c', state }))).resolves.toMatchObject({
+			ok: false,
+			message: 'That is a different ChatGPT account. Continue with ChatGPT again to add it.',
+		})
+		const revoked = vi
+			.mocked(fetch)
+			.mock.calls.filter(([url]) => url === REVOKE_URL)
+			.map(([, init]) => Object.fromEntries(new URLSearchParams(String(init?.body))))
+		expect(revoked).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ token: 'refresh-0', client_id: 'oaiapp_issued' }),
+				expect.objectContaining({ token: 'refresh-1', client_id: 'oaiapp_issued' }),
+			]),
+		)
+		expect(revoked).toHaveLength(2)
+		expect(account()).toBeUndefined()
+	})
+
+	it('says so when OpenAI refuses to revoke the issued token of another account', async () => {
+		vaultStore.set('account', { clientId: 'oaiapp_issued', subject: 'first-subject' })
+		await beginSignIn()
+		const { state } = pending()
+		answerTokens()
+		const route = vi.mocked(fetch).getMockImplementation()
+		vi.mocked(fetch).mockImplementation(async (url, init) =>
+			url === REVOKE_URL
+				? new Response(null, { status: 400 })
+				: (route?.(url, init) as Promise<Response>),
+		)
+
+		await expect(completeSignIn(callback({ code: 'c', state }))).resolves.toMatchObject({
+			ok: false,
+			message: expect.stringContaining('did not confirm'),
+		})
+		expect(account()).toBeUndefined()
+	})
 })
