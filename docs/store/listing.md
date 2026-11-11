@@ -35,8 +35,9 @@ Diff size and conflicts on pull request lists. On a repository's pull request li
 +additions −deletions · N files, with the lines of code alone in parentheses after the totals when
 tests, docs, lockfiles, generated files, blank and comment lines or whitespace-only changes make up
 part of the diff, and a red Conflicts marker on an open pull request whose branch conflicts with its
-base, or an orange Can't rebase one when it merges but would not rebase cleanly (signed in to
-GitHub).
+base, or an orange Can't rebase one when it merges but would not rebase cleanly, followed by an
+orange Unresolved comments marker when the repository requires conversation resolution and open
+conversations block the merge (signed in to GitHub).
 
 On the pull request page:
 
@@ -77,8 +78,9 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
   deletions, files and lines of code. On those lists the service worker also reads, with the user's
   GitHub session, the merge box state GitHub's own page loads from
   `https://github.com/<owner>/<repo>/pull/<number>/page_data/merge_box`, to mark pull requests with
-  merge conflicts or a blocked rebase, and after GitHub switches a list to another filter or page,
-  that page's list data as JSON, to know each row's head commit.
+  merge conflicts, a blocked rebase or unresolved conversations that block the merge, and after
+  GitHub switches a list to another filter or page, that page's list data as JSON, to know each
+  row's head commit.
 - **Host permission `https://patch-diff.githubusercontent.com/*`**: GitHub redirects those diff
   downloads to this host, which sends no CORS headers for the page, so the service worker follows
   the redirect itself.

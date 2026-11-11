@@ -20,8 +20,10 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   kept for the head commit the list shows and reused for up to a week until a new commit is pushed
   (10 minutes when the list does not say which commit it shows). When you are signed in, an open
   pull request (not a draft) whose branch conflicts with its base gets a red `Conflicts` marker, or
-  an orange `Can't rebase` one when it merges but would not rebase cleanly, read from GitHub's merge
-  box and cached for 10 minutes or until a new commit is pushed. Only rows on screen or one screen
+  an orange `Can't rebase` one when it merges but would not rebase cleanly. An orange
+  `Unresolved comments` marker follows when the repository requires conversation resolution and
+  open conversations block the merge; open threads alone never show it. Both come from GitHub's merge
+  box and are cached for 10 minutes or until a new commit is pushed. Only rows on screen or one screen
   below are asked about; the rest are asked when you scroll to them. Every tab shares one queue of
   three requests at a time, and a pull request two tabs ask about is fetched once. When GitHub
   rate-limits these requests, the list waits as long as GitHub asks (a minute if it does not say,

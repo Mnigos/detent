@@ -151,6 +151,29 @@ Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack
   repository-level requirements that fail. A viewer who cannot merge gets no methods listed, so detent makes no
   rebase request and shows no **Can't rebase** for them. Which status a repository with rebase merging turned off
   reports is not checked.
+- Unresolved comments (checked 2026-11-11 in `t-bb7eb26e8c5204a4.js` and `51r-97b1a96ce675d0b1.js` on
+  github.githubassets.com, both loaded by a public pull request page signed out; the classic `44-*.js` merge box
+  has no word on it). GitHub's merge status panel shows "Unresolved comments must be resolved / Resolve all comments
+  before merging." (item `comments-resolution-required`) when `j7(mergeRequirements)` holds and the unresolved
+  thread count is above 0:
+  `function j7(e){if(!e)return!1;for(let t of e.conditions)if("ruleRollups"in t){for(let e of t.ruleRollups)if("REQUIRED_REVIEW_THREAD_RESOLUTION"===e.ruleType||e.metadata&&"failureReasons"in e.metadata&&e.metadata.failureReasons.some(e=>"thread_resolution_required"===e.toLowerCase()))return!0}return!1}`
+  and `j7(r)&&t?{kind:"comments-resolution-required"}` with `t` = `unresolvedThreads > 0`. The rule rollups live in
+  the `PULL_REQUEST_RULES` condition (`{type, result, ruleRollups: [{ruleType, result, metadata}]}`): branch
+  protection's "Require conversation resolution" is its own `REQUIRED_REVIEW_THREAD_RESOLUTION` rule, a ruleset's
+  pull request rule (`ruleType: "PULL_REQUEST"`) lists `thread_resolution_required` among
+  `metadata.failureReasons` (GitHub compares them lowercased). Elsewhere the bundle only counts rollups with
+  `result: "FAILED"` as failing (`ruleRollups.filter(e=>"FAILED"===e.result)`).
+- The count is not in the merge box. GitHub's "Comments N unresolved" tile reads `unresolvedConversationCount` and
+  `resolvedConversationCount` from the `tabCounts` route query, `GET /<o>/<r>/pull/<n>/page_data/tab_counts`
+  (module `En`: `d(e){…{unresolvedThreads:e.unresolvedConversationCount,…}}`), which answers signed out too
+  (`{"annotationsCount":0,"checksCount":1,"conversationCount":1,"filesChangedCount":19,…,"unresolvedConversationCount":0,"resolvedConversationCount":0,"findingsCount":0}`
+  on `Mnigos/detent#8`). detent makes no extra request for it: it reads only the first merge box answer and marks
+  **Unresolved comments** when a rollup there has `result: "FAILED"` and is the thread resolution rule, or a pull
+  request rule that names `thread_resolution_required`. A passed rule, or no rule at all, is no marker however many
+  threads are open. GitHub's own check needs the rule and open threads; detent's needs the rule to fail, which should
+  be the same thing once threads are open. A signed-in answer with the rule failed was not captured (the fixtures are
+  hand-written), so whether GitHub reports the rollup as `FAILED` for unresolved threads is read from the bundle, not
+  observed.
 - Signed out: the PR page renders no merge box ("Sign up for free to join this conversation"), the embedded React
   data carries only live-update channel names (`mergeboxChannels`, `gitMergeStateChannel`), the hovercard
   (`/pull/<n>/hovercard`, 5 KB) and the list page's own payload say nothing about conflicts, and `merge_box`,
@@ -192,7 +215,8 @@ profiles, frequent reloads), which is why the list asks as little as below.
   an entry without code counts is dropped on read, and the old `diffStats` key is removed on install) and reused
   for 7 days while the row shows that commit, 10 minutes when either side has no commit. A failure is retried after
   10 minutes.
-  Conflict states (`mergeConflicts:v3`) carry the head commit too: 10 minutes, or at once when the row shows another
+  Conflict states (`mergeConflicts:v4`, with `unresolved: true` when unresolved conversations block the merge; v3
+  entries never looked at them and are not read) carry the head commit too: 10 minutes, or at once when the row shows another
   commit. The base branch moving is not visible in the list data, hence the time limit.
 - Viewport: an IntersectionObserver with `rootMargin: "0px 0px 100% 0px"` on each row's `<li>`; only rows inside it
   are queued, in page order, and a waiting row that leaves it is dropped until it comes back. Cached rows render
