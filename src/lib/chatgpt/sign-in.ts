@@ -3,8 +3,10 @@ import {
 	API_URL,
 	AUTHORIZE_URL,
 	clearNotice,
+	currentSignInEpoch,
 	DYNAMIC_CLIENT_ID,
 	forgetAccount,
+	PENDING_KEY,
 	PLAN_SCOPE,
 	postToken,
 	REDIRECT_URI,
@@ -17,10 +19,10 @@ import {
 } from './account'
 import { verifyIdToken } from './id-token'
 import { challengeOf, randomToken } from './pkce'
+import { revoke } from './session'
 import { vault } from './vault'
 
 const HOST_ID_KEY = 'hostId'
-const PENDING_KEY = 'pending'
 /** A sign-in tab left open longer than this has to start over. */
 export const PENDING_LIFETIME_MILLISECONDS = 15 * 60_000
 
@@ -159,6 +161,7 @@ export function completeSignIn(href: string): Promise<SignInResult> {
 }
 
 async function finish(href: string): Promise<SignInResult> {
+	const epoch = currentSignInEpoch()
 	const pending = await vault.get<Pending>(PENDING_KEY)
 	const callback = parseCallback(new URL(href), pending)
 	if (callback.kind === 'error') {
@@ -209,6 +212,11 @@ async function finish(href: string): Promise<SignInResult> {
 		return fail('That is a different ChatGPT account. Continue with ChatGPT again to add it.')
 	}
 
+	// Signed out while this exchange ran: the new session is ended at OpenAI too, not saved.
+	if (currentSignInEpoch() !== epoch) {
+		if (tokens.refreshToken) await revoke(clientId, tokens.refreshToken)
+		return fail('Signed out while signing in. Continue with ChatGPT to sign in again.')
+	}
 	const account = { clientId, subject: identity.subject, email: identity.email }
 	if (!tokens.scopes.includes(PLAN_SCOPE)) {
 		await saveAccount({ ...account, needsConsent: true })

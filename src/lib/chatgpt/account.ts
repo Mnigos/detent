@@ -41,6 +41,18 @@ export interface Account {
 
 const ACCOUNT_KEY = 'account'
 const NOTICE_KEY = 'notice'
+export const PENDING_KEY = 'pending'
+
+// Bumped by every sign-out: a sign-in that started before it must not save its tokens after it.
+let signInEpoch = 0
+
+export const currentSignInEpoch = () => signInEpoch
+
+/** Ends every sign-in still waiting for its callback or in the middle of its code exchange. */
+export async function cancelSignIns() {
+	signInEpoch++
+	await vault.remove(PENDING_KEY)
+}
 
 export const readAccount = () => vault.get<Account>(ACCOUNT_KEY)
 export const saveAccount = (account: Account) => vault.set(ACCOUNT_KEY, account)
