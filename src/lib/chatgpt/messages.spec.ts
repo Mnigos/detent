@@ -26,8 +26,8 @@ describe('pickModel', () => {
 		expect(pickModel('', [model('gpt-6.1-sol'), model('gpt-5.6-terra')])).toBe('gpt-6.1-sol')
 	})
 
-	it('keeps the saved value when the list is empty', () => {
+	it('keeps the saved value when the list is empty, and takes gpt-6-luna when none is saved', () => {
 		expect(pickModel('gpt-6.1-sol', [])).toBe('gpt-6.1-sol')
-		expect(pickModel('', [])).toBe('')
+		expect(pickModel('', [])).toBe('gpt-6-luna')
 	})
 })
