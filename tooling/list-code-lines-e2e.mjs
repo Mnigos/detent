@@ -51,11 +51,21 @@ try {
 		console.log(
 			`#${row.number} ${row.text}${row.title ? `\n  ${row.title.replaceAll('\n', ' | ')}` : ''}`,
 		)
-	const withCode = rows.filter((row) => row.text.includes('code'))
-	console.log(`rows: ${rows.length}, with code part: ${withCode.length}`)
-	if (withCode.length === 0 || withCode.some((row) => !row.title?.startsWith('Excluded: '))) {
+	const format = /^·\+[\d\u2009]+−[\d\u2009]+(\(\+[\d\u2009]+−[\d\u2009]+\))?·[\d\u2009]+ files?$/
+	const malformed = rows.filter((row) => !format.test(row.text ?? ''))
+	const withCode = rows.filter((row) => row.text?.includes('('))
+	console.log(
+		`rows: ${rows.length}, with code part: ${withCode.length}, malformed: ${malformed.length}`,
+	)
+	if (
+		malformed.length > 0 ||
+		withCode.length === 0 ||
+		withCode.some((row) => !/^Lines of code, .+\nExcluded: /.test(row.title ?? ''))
+	) {
 		failed = true
-		console.error('expected rows with a code part and an "Excluded:" title')
+		console.error(
+			'expected "+a −d (+c −e) · N files" rows titled "Lines of code, …" then "Excluded:"',
+		)
 	}
 
 	await page.screenshot({ path: join(screenshots, 'list.png') })

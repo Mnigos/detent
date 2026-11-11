@@ -39,7 +39,10 @@ const formatChange = ({ additions, deletions }: LineCounts) =>
 		.filter(Boolean)
 		.join(' ')
 
-/** The title of the code part: what was left out of the code counts, kind by kind. */
+export const CODE_TOOLTIP_HEADING =
+	'Lines of code, without tests, docs, lockfiles, generated files, blank and comment lines or whitespace-only changes.'
+
+/** The title of the code part: what its numbers are, then what was left out of them, kind by kind. */
 export function codeTooltip({ excluded }: Pick<DiffStats, 'excluded'>): string {
 	const parts = (Object.keys(EXCLUDED_LABELS) as ExcludedKind[]).flatMap((kind) => {
 		const counts = excluded[kind]
@@ -47,5 +50,5 @@ export function codeTooltip({ excluded }: Pick<DiffStats, 'excluded'>): string {
 		return counts ? `${EXCLUDED_LABELS[kind]} ${formatChange(counts)}` : []
 	})
 
-	return `Excluded: ${parts.join(', ')}.\nComment lines are detected approximately.`
+	return `${CODE_TOOLTIP_HEADING}\nExcluded: ${parts.join(', ')}.\nComment lines are detected approximately.`
 }
