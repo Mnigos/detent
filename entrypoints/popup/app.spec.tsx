@@ -104,6 +104,21 @@ describe('provider choice', () => {
 		expect(text()).toContain('count against your ChatGPT plan')
 	})
 
+	it('asks the worker about ChatGPT only once ChatGPT is chosen', async () => {
+		vi.mocked(chatGpt.status).mockResolvedValue(SIGNED_OUT)
+		await act(async () =>
+			root.render(<App settings={DEFAULT_SETTINGS} usage={EMPTY_USAGE} chatgptRequests={0} />),
+		)
+		expect(chatGpt.status).not.toHaveBeenCalled()
+
+		await click(container.querySelector('input[value="chatgpt"]') ?? undefined)
+		expect(chatGpt.status).toHaveBeenCalledOnce()
+		expect(button('Continue with ChatGPT')).toBeDefined()
+		await click(container.querySelector('input[value="openrouter"]') ?? undefined)
+		await click(container.querySelector('input[value="chatgpt"]') ?? undefined)
+		expect(chatGpt.status).toHaveBeenCalledOnce()
+	})
+
 	it('resets only the counter of the chosen provider', async () => {
 		await render(CHATGPT, SIGNED_OUT, 4)
 		await click(button('reset'))
