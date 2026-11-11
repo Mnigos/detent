@@ -1,5 +1,5 @@
 import { Suspense, useState } from 'react'
-import { type ChatGptStatus, USAGE_SETTINGS_URL } from '@/src/lib/chatgpt/messages'
+import { type ChatGptStatus, chatGpt, USAGE_SETTINGS_URL } from '@/src/lib/chatgpt/messages'
 import { PROVIDER_NAMES } from '@/src/lib/model/provider'
 import { EMPTY_USAGE, formatCost, requestUsageReset, type Usage } from '@/src/lib/model/usage'
 import { type ProviderChoice, type Settings, writeSettings } from '@/src/lib/settings'
@@ -12,7 +12,8 @@ const LINK = 'underline hover:text-neutral-300'
 interface AppProps {
 	settings: Settings
 	usage: Usage
-	chatgpt: Promise<ChatGptStatus>
+	/** The worker's answer about the account, asked only when ChatGPT is the chosen provider. */
+	chatgpt?: Promise<ChatGptStatus>
 	chatgptRequests: number
 	isLoading?: boolean
 }
@@ -22,19 +23,22 @@ const plural = (count: number) => `${count} ${count === 1 ? 'request' : 'request
 export function App({
 	settings,
 	usage: initialUsage,
-	chatgpt,
+	chatgpt: initialChatgpt,
 	chatgptRequests: initialRequests,
 	isLoading = false,
 }: AppProps) {
 	const [usage, setUsage] = useState(initialUsage)
 	const [chatgptRequests, setChatgptRequests] = useState(initialRequests)
 	const [provider, setProvider] = useState(settings.provider)
+	const [chatgpt, setChatgpt] = useState(initialChatgpt)
 	const [isEnabled, setIsEnabled] = useState(settings.isEnabled)
 	const [showListStats, setShowListStats] = useState(settings.showListStats)
 	const isChatGpt = provider === 'chatgpt'
 
 	async function choose(next: ProviderChoice) {
 		setProvider(next)
+		// The worker may reach OpenAI for the models; that waits until ChatGPT is chosen.
+		if (next === 'chatgpt' && !chatgpt) setChatgpt(chatGpt.status())
 		await writeSettings({ provider: next })
 	}
 
@@ -97,12 +101,14 @@ export function App({
 					))}
 				</div>
 			</fieldset>
-			{/* Both stay mounted, so switching back keeps what was typed or changed there. */}
-			<div hidden={!isChatGpt}>
-				<Suspense fallback={<p className="text-neutral-500 text-xs">Checking ChatGPT…</p>}>
-					<ChatGptAccount status={chatgpt} model={settings.chatgptModel} isLoading={isLoading} />
-				</Suspense>
-			</div>
+			{/* Both stay mounted once shown, so switching back keeps what was typed or changed there. */}
+			{chatgpt && (
+				<div hidden={!isChatGpt}>
+					<Suspense fallback={<p className="text-neutral-500 text-xs">Checking ChatGPT…</p>}>
+						<ChatGptAccount status={chatgpt} model={settings.chatgptModel} isLoading={isLoading} />
+					</Suspense>
+				</div>
+			)}
 			<div hidden={isChatGpt} className="flex flex-col gap-3">
 				<OpenRouterSettings settings={settings} isLoading={isLoading} />
 			</div>

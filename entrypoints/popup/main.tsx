@@ -8,9 +8,6 @@ import './style.css'
 const container = document.getElementById('root')
 if (!container) throw new Error('popup root element is missing')
 
-// The worker owns the ChatGPT account and may need to reach OpenAI first; only the ChatGPT section
-// waits for it. The popup only ever sees the email, the models and a notice.
-const chatgpt = chatGpt.status()
 const root = createRoot(container)
 // Paint at once with the fields disabled; the stored values swap in through a remount when they arrive.
 root.render(
@@ -18,7 +15,6 @@ root.render(
 		key="loading"
 		settings={DEFAULT_SETTINGS}
 		usage={EMPTY_USAGE}
-		chatgpt={chatgpt}
 		chatgptRequests={0}
 		isLoading
 	/>,
@@ -30,7 +26,10 @@ void Promise.all([readSettings(), readUsage(), readChatGptRequests()]).then(
 				key="ready"
 				settings={settings}
 				usage={usage}
-				chatgpt={chatgpt}
+				// The worker owns the ChatGPT account and may reach OpenAI for the models, so it is asked
+				// only when ChatGPT is chosen; only that section waits. The popup sees the email, the
+				// models and a notice, never a token.
+				chatgpt={settings.provider === 'chatgpt' ? chatGpt.status() : undefined}
 				chatgptRequests={chatgptRequests}
 			/>,
 		),
