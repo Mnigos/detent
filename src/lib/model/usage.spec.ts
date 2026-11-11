@@ -6,13 +6,17 @@ import {
 	readUsage,
 	recordChatGptRequest,
 	recordUsage,
+	requestUsageReset,
 	resetChatGptRequests,
 	resetUsage,
 	usageOf,
 } from './usage'
 
 vi.mock('wxt/browser', () => ({
-	browser: { storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() } } },
+	browser: {
+		storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() } },
+		runtime: { sendMessage: vi.fn() },
+	},
 }))
 
 let stored: Record<string, unknown>
@@ -40,6 +44,36 @@ describe('ChatGPT request counter', () => {
 		await resetChatGptRequests()
 		expect(await readChatGptRequests()).toBe(0)
 		expect((await readUsage()).requests).toBe(1)
+	})
+
+	it.each([
+		['ChatGPT', recordChatGptRequest, resetChatGptRequests, 'chatgptUsage'],
+		['OpenRouter', () => recordUsage(DELTA), resetUsage, 'usage'],
+	] as const)(
+		'keeps the %s counter reset after a count that read before it',
+		async (_name, record, reset, key) => {
+			stored[key] = { requests: 3 }
+			const read = vi.mocked(browser.storage.local.get).getMockImplementation()
+			let release!: () => void
+			vi.mocked(browser.storage.local.get).mockImplementationOnce(
+				(keys) => new Promise((resolve) => (release = () => resolve(read?.(keys)))),
+			)
+			const counting = record()
+			await vi.waitFor(() => expect(release).toBeDefined())
+			const resetting = reset()
+			release()
+			await Promise.all([counting, resetting])
+
+			expect(stored[key]).toBeUndefined()
+		},
+	)
+
+	it('asks the worker to reset the chosen counter', async () => {
+		await requestUsageReset('chatgpt')
+		expect(browser.runtime.sendMessage).toHaveBeenCalledWith({
+			type: 'detent:usage:reset',
+			provider: 'chatgpt',
+		})
 	})
 })
 

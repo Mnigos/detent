@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type ChatGptStatus, chatGpt, SIGNED_OUT } from '@/src/lib/chatgpt/messages'
-import { EMPTY_USAGE, resetChatGptRequests, resetUsage } from '@/src/lib/model/usage'
+import { EMPTY_USAGE, requestUsageReset } from '@/src/lib/model/usage'
 import { DEFAULT_SETTINGS, type Settings, writeSettings } from '@/src/lib/settings'
 import { App } from './app'
 
@@ -17,8 +17,7 @@ vi.mock('@/src/lib/settings', async (original) => ({
 }))
 vi.mock('@/src/lib/model/usage', async (original) => ({
 	...(await original<typeof import('@/src/lib/model/usage')>()),
-	resetUsage: vi.fn(async () => undefined),
-	resetChatGptRequests: vi.fn(async () => undefined),
+	requestUsageReset: vi.fn(async () => true),
 }))
 vi.mock('@/src/lib/model/openrouter', () => ({ testOpenRouter: vi.fn() }))
 
@@ -109,8 +108,7 @@ describe('provider choice', () => {
 		await render(CHATGPT, SIGNED_OUT, 4)
 		await click(button('reset'))
 
-		expect(resetChatGptRequests).toHaveBeenCalledOnce()
-		expect(resetUsage).not.toHaveBeenCalled()
+		expect(requestUsageReset).toHaveBeenCalledExactlyOnceWith('chatgpt')
 		expect(text()).toContain('Usage: 0 requests')
 	})
 })
