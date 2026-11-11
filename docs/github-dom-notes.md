@@ -188,8 +188,10 @@ profiles, frequent reloads), which is why the list asks as little as below.
   the same route JSON (`{"meta":…,"payload":{"repoPullsDashboardContentRoute":…}}`, about 30 KB for 25 rows), the
   request its own client makes on navigation. Those rows wait for that answer; when it has nothing for them, they
   fall back on the 10-minute stats cache.
-- Diff stats are stored with the head commit (`diffStats`, `headSha` field; entries without it, from older builds,
-  are read as before) and reused for 7 days while the row shows that commit. A failure is retried after 10 minutes.
+- Diff stats are stored with their code line counts and the head commit (`diffStats:v2`, optional `headSha` field;
+  an entry without code counts is dropped on read, and the old `diffStats` key is removed on install) and reused
+  for 7 days while the row shows that commit, 10 minutes when either side has no commit. A failure is retried after
+  10 minutes.
   Conflict states (`mergeConflicts:v3`) carry the head commit too: 10 minutes, or at once when the row shows another
   commit. The base branch moving is not visible in the list data, hence the time limit.
 - Viewport: an IntersectionObserver with `rootMargin: "0px 0px 100% 0px"` on each row's `<li>`; only rows inside it
