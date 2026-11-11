@@ -1,12 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { browser } from 'wxt/browser'
-import { formatCost, readUsage, recordUsage, resetUsage, usageOf } from './usage'
+import {
+	formatCost,
+	readChatGptRequests,
+	readUsage,
+	recordChatGptRequest,
+	recordUsage,
+	resetChatGptRequests,
+	resetUsage,
+	usageOf,
+} from './usage'
 
 vi.mock('wxt/browser', () => ({
 	browser: { storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() } } },
 }))
 
 let stored: Record<string, unknown>
+const DELTA = { promptTokens: 1, completionTokens: 1, cost: 0.001 }
 
 beforeEach(() => {
 	stored = {}
@@ -18,6 +28,18 @@ beforeEach(() => {
 	})
 	vi.mocked(browser.storage.local.remove).mockImplementation(async (key) => {
 		delete stored[String(key)]
+	})
+})
+
+describe('ChatGPT request counter', () => {
+	it('counts concurrent requests and resets apart from the OpenRouter counter', async () => {
+		await Promise.all([recordChatGptRequest(), recordChatGptRequest(), recordUsage(DELTA)])
+		expect(await readChatGptRequests()).toBe(2)
+		expect((await readUsage()).requests).toBe(1)
+
+		await resetChatGptRequests()
+		expect(await readChatGptRequests()).toBe(0)
+		expect((await readUsage()).requests).toBe(1)
 	})
 })
 

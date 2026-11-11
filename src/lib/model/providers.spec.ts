@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '../settings'
 import { groupLayersWithOpenRouter, prioritizeWithOpenRouter } from './openrouter'
-import { failure, resolveProvider } from './provider'
+import { failure } from './provider'
+import { resolveProvider } from './providers'
 import { recordUsage } from './usage'
 
 vi.mock('./openrouter', () => ({

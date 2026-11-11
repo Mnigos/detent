@@ -11,13 +11,8 @@ import { type AnalysisFile, analysisKeys, readAnalysisCache, saveAnalysis } from
 import { groupingRepairPaths, groupingSnapshot } from './grouping-quality'
 import { prepareGroupingUpdate } from './incremental-grouping'
 import { timeoutFor } from './openrouter'
-import {
-	failure,
-	type ModelError,
-	type ModelProvider,
-	type ProviderId,
-	resolveProvider,
-} from './provider'
+import { failure, type ModelError, type ModelProvider, type ProviderId } from './provider'
+import { resolveProvider } from './providers'
 
 export const LABEL_LAYERS_MESSAGE = 'detent:label-layers'
 

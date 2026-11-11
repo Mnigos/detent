@@ -4,13 +4,8 @@ import type { PriorityEntry } from '../priority/schema'
 import { readSettings } from '../settings'
 import { keepWorkerAlive, withExcerpts } from './label-layers'
 import { readPriorityCache, savePriorities } from './priority-cache'
-import {
-	failure,
-	type ModelError,
-	type ModelProvider,
-	type ProviderId,
-	resolveProvider,
-} from './provider'
+import { failure, type ModelError, type ModelProvider, type ProviderId } from './provider'
+import { resolveProvider } from './providers'
 
 export const PRIORITIZE_MESSAGE = 'detent:prioritize'
 
