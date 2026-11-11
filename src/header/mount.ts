@@ -12,7 +12,7 @@ import {
 import { createRateLimitPause } from '@/src/lib/list/rate-limit'
 import { type DiffStats, diffStats } from '@/src/lib/list/stats'
 import { observeMutations } from '@/src/lib/panel/github-dom'
-import type { PullRequestLocation } from '@/src/lib/pull-request-url'
+import { type PullRequestLocation, parsePullRequestUrl } from '@/src/lib/pull-request-url'
 
 const IDLE_TIMEOUT_MILLISECONDS = 2000
 /** How soon a download held back for a pause this tab did not see is asked again. */
@@ -47,22 +47,35 @@ export async function startHeaderStats(location: PullRequestLocation) {
 	let headSha = readHeadSha(location)
 	// The counts, or a failure, for the head commit the page shows; undefined while they are still to load.
 	let entry: StatsEntry | undefined = isStatsFresh(cache[key], headSha) ? cache[key] : undefined
-	let href = window.location.href
 	let isLoading = false
 	let isStopped = false
 	let stop: (() => void) | undefined
 	const idle = new Set<() => void>()
 	const timers = new Set<ReturnType<typeof setTimeout>>()
 
-	// A tab switch may show a newer head commit, or come after a remembered failure ran out: either loads again.
-	function revalidate() {
-		if (window.location.href === href) return
+	// What the head commit is read from: the URL (its tab), GitHub's embedded page data and the classic page's partial
+	// URLs. Comparing them is cheap; the head is read again only when one of them changed.
+	const headSources = () => [
+		window.location.href,
+		document.querySelector('[data-url*="end_commit_oid="]')?.getAttribute('data-url'),
+		...document.querySelectorAll('script[data-target$=".embeddedData"]'),
+	]
+	let sources: unknown[] = headSources()
 
-		href = window.location.href
-		const next = readHeadSha(location)
-		if (next && next !== headSha) {
-			headSha = next
-			entry = undefined
+	// A tab switch or newly rendered page data may show another head commit, or the page may no longer say which (the
+	// ten-minute rule then applies); a remembered failure that ran out is tried again too.
+	function revalidate() {
+		const next = headSources()
+		if (next.length === sources.length && next.every((source, index) => source === sources[index]))
+			return
+
+		sources = next
+		const current = parsePullRequestUrl(window.location.href)
+		const head = readHeadSha(current ? { ...location, tab: current.tab } : location)
+		if (head !== headSha) {
+			headSha = head
+			// Counts of another head commit are not shown.
+			if (entry?.headSha && head && entry.headSha !== head) entry = undefined
 		}
 		if (!isStatsFresh(entry, headSha)) void load()
 	}
