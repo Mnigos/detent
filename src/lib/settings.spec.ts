@@ -9,8 +9,10 @@ beforeEach(() => {
 describe('readSettings', () => {
 	it('answers an empty key and the default model when nothing is stored', async () => {
 		await expect(readSettings()).resolves.toEqual({
+			provider: 'openrouter',
 			openRouterKey: '',
 			model: DEFAULT_MODEL,
+			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
 		})
@@ -22,8 +24,10 @@ describe('readSettings', () => {
 		})
 
 		await expect(readSettings()).resolves.toEqual({
+			provider: 'openrouter',
 			openRouterKey: 'sk-or-1',
 			model: DEFAULT_MODEL,
+			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
 		})
@@ -33,8 +37,10 @@ describe('readSettings', () => {
 		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { openRouterKey: 3, model: null } })
 
 		await expect(readSettings()).resolves.toEqual({
+			provider: 'openrouter',
 			openRouterKey: '',
 			model: DEFAULT_MODEL,
+			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
 		})
@@ -53,23 +59,41 @@ describe('readSettings', () => {
 	})
 })
 
+describe('provider choice', () => {
+	it('keeps the ChatGPT choice and its own model apart from the OpenRouter model', async () => {
+		await fakeBrowser.storage.local.set({
+			[SETTINGS_KEY]: { provider: 'chatgpt', chatgptModel: ' gpt-6-luna ', model: 'm/x' },
+		})
+
+		await expect(readSettings()).resolves.toMatchObject({
+			provider: 'chatgpt',
+			chatgptModel: 'gpt-6-luna',
+			model: 'm/x',
+		})
+	})
+
+	it('falls back to OpenRouter for anything else', async () => {
+		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { provider: 'gemini' } })
+
+		expect((await readSettings()).provider).toBe('openrouter')
+	})
+})
+
 describe('writeSettings', () => {
 	it('merges the partial into the stored settings and returns the result', async () => {
 		await writeSettings({ openRouterKey: 'sk-or-1' })
 
-		await expect(writeSettings({ model: 'anthropic/claude-sonnet-5' })).resolves.toEqual({
+		const expected = {
+			provider: 'openrouter',
 			openRouterKey: 'sk-or-1',
 			model: 'anthropic/claude-sonnet-5',
+			chatgptModel: '',
 			isEnabled: true,
 			showListStats: true,
-		})
+		}
+		await expect(writeSettings({ model: 'anthropic/claude-sonnet-5' })).resolves.toEqual(expected)
 		await expect(fakeBrowser.storage.local.get(SETTINGS_KEY)).resolves.toEqual({
-			[SETTINGS_KEY]: {
-				openRouterKey: 'sk-or-1',
-				model: 'anthropic/claude-sonnet-5',
-				isEnabled: true,
-				showListStats: true,
-			},
+			[SETTINGS_KEY]: expected,
 		})
 	})
 })

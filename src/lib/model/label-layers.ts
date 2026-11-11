@@ -6,12 +6,18 @@ import type { GroupingEntry } from '../layers/grouping'
 import type { LabelEntry } from '../layers/label-schema'
 import { STEP_SIZE_LIMIT } from '../layers/layer-budget'
 import { hasUnassigned, placeLeftovers } from '../layers/leftovers'
-import { readSettings, type Settings } from '../settings'
+import { readSettings } from '../settings'
 import { type AnalysisFile, analysisKeys, readAnalysisCache, saveAnalysis } from './analysis-cache'
 import { groupingRepairPaths, groupingSnapshot } from './grouping-quality'
 import { prepareGroupingUpdate } from './incremental-grouping'
-import { groupLayersWithOpenRouter, type OpenRouterError, timeoutFor } from './openrouter'
-import { recordUsage } from './usage'
+import { timeoutFor } from './openrouter'
+import {
+	failure,
+	type ModelError,
+	type ModelProvider,
+	type ProviderId,
+	resolveProvider,
+} from './provider'
 
 export const LABEL_LAYERS_MESSAGE = 'detent:label-layers'
 
@@ -33,9 +39,9 @@ export interface LabelLayersResponse {
 	layers: LabelEntry[]
 	grouping?: GroupingEntry[]
 	source: 'model' | 'fallback'
-	labeler: 'openrouter' | 'none'
+	labeler: ProviderId | 'none'
 	model?: string
-	error?: OpenRouterError
+	error?: ModelError
 	/** US dollars this very answer cost; absent for cached answers. */
 	cost?: number
 	isStale?: boolean
@@ -65,43 +71,43 @@ export function keepWorkerAlive(): () => void {
 	return () => clearInterval(timer)
 }
 
-async function fromOpenRouter(
-	{ openRouterKey: key, model }: Settings,
+async function fromProvider(
+	provider: ModelProvider,
 	input: string,
 	ids: Map<string, string>,
 ): Promise<LabelLayersResponse> {
+	const { id, model } = provider
 	const release = keepWorkerAlive()
 	const started = Date.now()
 	// These lines are what a reviewer pastes when the layers stay structural; keep them complete.
 	console.info(
-		`[detent] openrouter ${model}: ${ids.size} files, ${input.length} chars, deadline ${Math.round(timeoutFor(input) / 1000)}s`,
+		`[detent] ${id} ${model}: ${ids.size} files, ${input.length} chars, deadline ${Math.round(timeoutFor(input) / 1000)}s`,
 	)
-	let answer: Awaited<ReturnType<typeof groupLayersWithOpenRouter>>
+	let answer: Awaited<ReturnType<ModelProvider['group']>>
 	try {
-		answer = await groupLayersWithOpenRouter({ key, model, input })
+		answer = await provider.group(input)
 	} finally {
 		release()
 	}
-	const { layers, error, usage } = answer
+	const { value: layers, error, cost } = answer
 	const seconds = ((Date.now() - started) / 1000).toFixed(1)
 	if (layers)
 		console.info(
-			`[detent] openrouter answered in ${seconds}s: ${layers.length} steps, ${layers.reduce((count, group) => count + group.files.length, 0)} files placed, cost ${usage?.cost ?? '?'}`,
+			`[detent] ${id} answered in ${seconds}s: ${layers.length} steps, ${layers.reduce((count, group) => count + group.files.length, 0)} files placed, cost ${cost ?? '?'}`,
 		)
 	else
 		console.warn(
-			`[detent] openrouter failed in ${seconds}s: ${error?.kind}${error?.status ? ` (HTTP ${error.status})` : ''}`,
+			`[detent] ${id} failed in ${seconds}s: ${error?.kind}${error?.status ? ` (HTTP ${error.status})` : ''}`,
 		)
-	if (usage) await recordUsage(usage).catch(() => undefined)
 	if (!layers) return { layers: [], source: 'fallback', labeler: 'none', model, error }
 
 	return {
 		layers: [],
 		grouping: resolveFileIds(layers, ids),
 		source: 'model',
-		labeler: 'openrouter',
+		labeler: id,
 		model,
-		cost: usage?.cost,
+		cost,
 	}
 }
 
@@ -122,12 +128,13 @@ export function withExcerpts(
 export async function resolveLayerLabels(
 	incoming: LabelLayersRequest,
 ): Promise<LabelLayersResponse | undefined> {
-	const settings = await readSettings()
-	// Without a key there is no model to ask and nothing cached under one.
-	if (!settings.openRouterKey)
+	const configured = await resolveProvider(await readSettings())
+	// Without a provider there is no model to ask and nothing cached under one.
+	if (!configured)
 		return incoming.cacheOnly ? undefined : { layers: [], source: 'fallback', labeler: 'none' }
 
-	const labeler = `openrouter:${settings.model}`
+	const provider: ModelProvider = configured
+	const { labeler } = provider
 	const request = incoming
 	const ids = fileIds(request.groupingInput)
 	const excerpts = incoming.diffExcerpts
@@ -182,8 +189,8 @@ export async function resolveLayerLabels(
 			((update.changed.size === 0 && update.removed.size === 0) || update.paths.size === 0) &&
 			previous
 				? previous.response
-				: await fromOpenRouter(
-						settings,
+				: await fromProvider(
+						provider,
 						previous && update
 							? withExcerpts(update.input, excerpts, update.paths)
 							: withExcerpts(request.groupingInput, excerpts),
@@ -205,8 +212,8 @@ export async function resolveLayerLabels(
 				issues,
 				budget,
 			)
-			const corrected = await fromOpenRouter(
-				settings,
+			const corrected = await fromProvider(
+				provider,
 				withExcerpts(correction.input, excerpts, correction.paths),
 				ids,
 			)
@@ -228,8 +235,8 @@ export async function resolveLayerLabels(
 					budget,
 					splitIntent(group.name),
 				)
-				const answer = await fromOpenRouter(
-					settings,
+				const answer = await fromProvider(
+					provider,
 					withExcerpts(split.input, excerpts, split.paths),
 					ids,
 				)
@@ -257,7 +264,12 @@ export async function resolveLayerLabels(
 			candidate.grouping &&
 			allowed.size > 0 &&
 			!candidate.grouping.some((group) => group.files.some((path) => allowed.has(path)))
-				? { layers: [], source: 'fallback', labeler: 'none', error: { kind: 'invalid' } }
+				? {
+						layers: [],
+						source: 'fallback',
+						labeler: 'none',
+						error: failure('invalid', provider.id),
+					}
 				: candidate
 		if (response.source !== 'model') {
 			const fallback = previous
@@ -265,7 +277,7 @@ export async function resolveLayerLabels(
 						...previous.response,
 						grouping: update?.merge([]) ?? previous.response.grouping,
 						isStale: true,
-						error: response.error ?? { kind: 'request' as const },
+						error: response.error ?? failure('request', provider.id),
 					}
 				: response
 			RECENT_FAILURES.set(keys.exact, {
