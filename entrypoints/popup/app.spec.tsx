@@ -119,6 +119,11 @@ describe('provider choice', () => {
 		expect(chatGpt.status).toHaveBeenCalledOnce()
 	})
 
+	it('says what reaches OpenAI besides the pull requests', async () => {
+		await render(CHATGPT)
+		expect(text()).toContain('Signing in and loading the model list also reach OpenAI.')
+	})
+
 	it('resets only the counter of the chosen provider', async () => {
 		await render(CHATGPT, SIGNED_OUT, 4)
 		await click(button('reset'))
