@@ -5,6 +5,11 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
 - **Layers.** The changed files of a pull request are grouped into ordered review steps: a side
   panel on the classic "Files changed" page, a Layers mode in the file tree on the new Changes page.
   Keyboard: j/k files, n/p steps, Enter scroll, v viewed, r GitHub's order.
+- **Hide tests.** A beaker switch next to Layers | Priority | Files, and a Hide tests button in the
+  classic panel's header, take test files off the page: their tree rows, their diffs, and any layer
+  left empty. Viewed counters, j/k, n/p and the jump to the next unviewed file skip them, and a line
+  above the files says how many are hidden, with Show to bring them back. The diff is not fetched
+  again. The choice holds across pull requests and tabs.
 - **Priority Review.** A third mode in the Changes page file tree (Layers | Priority | Files) ranks
   the files into Urgent (at most 10), High, Medium and Low.
 - **Diff size on pull request lists.** Each row of `/<owner>/<repo>/pulls` shows
