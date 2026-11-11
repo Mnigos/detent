@@ -19,7 +19,7 @@ import {
 } from './account'
 import { verifyIdToken } from './id-token'
 import { challengeOf, randomToken } from './pkce'
-import { revoke } from './session'
+import { revoke, signOut } from './session'
 import { vault } from './vault'
 
 const HOST_ID_KEY = 'hostId'
@@ -210,9 +210,18 @@ async function finish(href: string): Promise<SignInResult> {
 	}
 	const known = pending.isRegistration ? undefined : saved
 	if (known?.subject && known.subject !== identity.subject) {
-		// This registration belongs to another account; the next attempt registers anew.
+		// This registration belongs to another account; the next attempt registers anew. Neither
+		// session is kept, so both end at OpenAI too: the saved one as a sign-out ends it.
+		const [ended, issued] = await Promise.all([
+			signOut(),
+			tokens.refreshToken ? revoke(clientId, tokens.refreshToken) : true,
+		])
 		await forgetAccount()
-		return fail('That is a different ChatGPT account. Continue with ChatGPT again to add it.')
+		return fail(
+			ended.revoked && issued
+				? 'That is a different ChatGPT account. Continue with ChatGPT again to add it.'
+				: 'That is a different ChatGPT account, and OpenAI did not confirm the sign-out. You can disconnect detent in ChatGPT settings.',
+		)
 	}
 
 	// Signed out while this exchange ran: the new session is ended at OpenAI too, not saved.
