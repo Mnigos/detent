@@ -26,7 +26,8 @@ published in the Chrome Web Store and to builds from this repository.
   extension asks `github.com` for the merge box state of each open pull request (not drafts) on
   screen or one screen below, in the same queue, with your GitHub session, the request GitHub's own
   pull request page makes for its merge box. Only whether the branch has conflicts, or cannot be
-  rebased, is kept, with the head commit it was read for. Signed out it asks nothing.
+  rebased, and whether unresolved conversations block the merge is kept, with the head commit it was
+  read for. No comment or thread content is read. Signed out it asks nothing.
   The "Show diff size and conflicts on pull request lists" switch in the popup turns both off.
 - **Model requests.** Only if you saved an OpenRouter API key in the popup, requests go directly
   from your browser to `openrouter.ai` with your key:
@@ -58,7 +59,8 @@ Everything the extension stores stays in your browser's extension storage:
   days (10 minutes when the list does not say which commit it shows) and capped at 500 pull
   requests,
 - merge conflict states for pull request lists: owner, repository, pull request number, whether it
-  has conflicts or cannot be rebased, the head commit and when that was read, reused for 10
+  has conflicts or cannot be rebased, whether unresolved conversations block its merge, the head
+  commit and when that was read, reused for 10
   minutes unless the list shows a newer commit, and capped at 500 pull requests,
 - when GitHub last rate-limited the list requests and until when they wait, so other tabs wait too,
 - a local counter of the tokens and cost your requests to OpenRouter reported.
