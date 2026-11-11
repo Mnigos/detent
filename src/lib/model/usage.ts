@@ -59,6 +59,33 @@ export async function resetUsage(): Promise<void> {
 	await browser.storage.local.remove(USAGE_KEY)
 }
 
+// ChatGPT plan usage has no per-request cost to show; its counter is the number of requests.
+export const CHATGPT_USAGE_KEY = 'chatgptUsage'
+
+export async function readChatGptRequests(): Promise<number> {
+	const stored = (await browser.storage.local.get(CHATGPT_USAGE_KEY))[CHATGPT_USAGE_KEY] as
+		| { requests?: unknown }
+		| undefined
+
+	return number(stored?.requests)
+}
+
+export function recordChatGptRequest(): Promise<number> {
+	const write = pending.then(async () => {
+		const requests = (await readChatGptRequests()) + 1
+		await browser.storage.local.set({ [CHATGPT_USAGE_KEY]: { requests } })
+
+		return requests
+	})
+	pending = write.catch(() => undefined)
+
+	return write
+}
+
+export async function resetChatGptRequests(): Promise<void> {
+	await browser.storage.local.remove(CHATGPT_USAGE_KEY)
+}
+
 /** OpenRouter's `usage` block of a completion, when the request asked for it. */
 export function usageOf(payload: unknown): UsageDelta | undefined {
 	const usage = (payload as { usage?: Record<string, unknown> } | undefined)?.usage
