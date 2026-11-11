@@ -33,7 +33,7 @@ export default defineBackground(() => {
 				.catch((error: unknown) =>
 					sendResponse(
 						(error instanceof PullRequestDiffError
-							? { status: error.status, rateLimit: error.rateLimit }
+							? { status: error.status, rateLimit: error.rateLimit, isPaused: error.isPaused }
 							: { status: 0 }) satisfies FetchDiffResponse,
 					),
 				)

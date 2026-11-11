@@ -1,4 +1,4 @@
-import { RateLimitError, readRateLimit } from '../rate-limit'
+import { RateLimitError, RequestPausedError, readRateLimit } from '../rate-limit'
 
 /** `rebase-blocked`: a merge commit or squash would go through, "Rebase and merge" would not. */
 export type ConflictState = 'conflicts' | 'rebase-blocked' | 'clean' | 'unknown'
@@ -109,7 +109,8 @@ async function requestMergeBox({ owner, repo, number }: PullRequestRef, query = 
 /**
  * Asks the merge box with GitHub's default method, which decides conflicts. Only when that answer is clean and the
  * viewer may rebase does a second request ask for rebase merging, to tell a clean pull request from one GitHub
- * cannot rebase. When `isPaused` turns true in between, that request is not sent and the call throws RateLimitError.
+ * cannot rebase. When `isPaused` turns true in between, that request is not sent and the call throws
+ * RequestPausedError.
  */
 export async function fetchConflictState(
 	ref: PullRequestRef,
@@ -118,7 +119,7 @@ export async function fetchConflictState(
 	const body = await requestMergeBox(ref)
 	const state = parseMergeBox(body)
 	if (state !== 'clean' || !allowsRebase(body)) return state
-	if (isPaused()) throw new RateLimitError()
+	if (isPaused()) throw new RequestPausedError()
 
 	return parseMergeBox(await requestMergeBox(ref, REBASE_QUERY), 'rebase')
 }

@@ -479,6 +479,23 @@ describe('list rate limits', () => {
 		expect(markers().map(({ state }) => state)).toEqual(['rebase-blocked'])
 	})
 
+	it('keeps a pause inferred when it only holds back the rebase follow-up request', async () => {
+		renderList([{ number: 1 }])
+		const fetch = stubMergeBox({ 1: 'REBASE_BLOCKED' }, 1000)
+		await mount()
+		await settle()
+		await vi.advanceTimersByTimeAsync(500)
+		const inferred = { until: Date.now() + 60_000, strikes: 1, inferred: true }
+		await fakeBrowser.storage.local.set({ [RATE_LIMIT_KEY]: inferred })
+		await vi.advanceTimersByTimeAsync(1000)
+		await settle()
+
+		expect(fetch).toHaveBeenCalledOnce()
+		await expect(fakeBrowser.storage.local.get(RATE_LIMIT_KEY)).resolves.toEqual({
+			[RATE_LIMIT_KEY]: inferred,
+		})
+	})
+
 	it("honours another tab's pause, stored before the list opens or written while it runs", async () => {
 		await fakeBrowser.storage.local.set({
 			[RATE_LIMIT_KEY]: { until: Date.now() + 90_000, strikes: 1 },

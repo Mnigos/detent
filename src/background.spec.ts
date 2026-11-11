@@ -18,6 +18,7 @@ vi.mock('./lib/diff/fetch-diff', () => ({
 		constructor(
 			readonly status: number,
 			readonly rateLimit?: object,
+			readonly isPaused = false,
 		) {
 			super()
 		}
@@ -130,6 +131,7 @@ describe('background diff message', () => {
 			expect(reply).toHaveBeenCalledExactlyOnceWith({
 				status: 429,
 				rateLimit: { retryAfterMilliseconds: 60_000 },
+				isPaused: false,
 			}),
 		)
 	})
