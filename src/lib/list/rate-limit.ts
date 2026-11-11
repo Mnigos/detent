@@ -81,8 +81,20 @@ export async function createRateLimitPause(onResume: () => void) {
 		schedule()
 	}
 
+	function store() {
+		browser.storage.local
+			.set({ [RATE_LIMIT_KEY]: state })
+			.catch((error: unknown) => console.warn('[detent]', error))
+	}
+
+	// Tabs write without a lock, so a tab that signalled a shorter pause at the same moment can overwrite a longer
+	// one; a tab still holding the longer pause writes it back, and every tab ends on the latest deadline.
 	const listener = (changes: Record<string, { newValue?: unknown }>, area: string) => {
-		if (area === 'local' && changes[RATE_LIMIT_KEY]) adopt(changes[RATE_LIMIT_KEY].newValue)
+		if (area !== 'local' || !changes[RATE_LIMIT_KEY]) return
+
+		const next = changes[RATE_LIMIT_KEY].newValue
+		if (Date.now() < state.until && !(isState(next) && next.until >= state.until)) store()
+		else adopt(next)
 	}
 	adopt(
 		await browser.storage.local
@@ -115,9 +127,7 @@ export async function createRateLimitPause(onResume: () => void) {
 				state = pauseState(now + started, strikes, isInferred)
 			}
 			schedule()
-			browser.storage.local
-				.set({ [RATE_LIMIT_KEY]: state })
-				.catch((error: unknown) => console.warn('[detent]', error))
+			store()
 
 			return started
 		},

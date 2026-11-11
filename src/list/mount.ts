@@ -29,7 +29,7 @@ import {
 } from '@/src/lib/list/rows'
 import { diffStats } from '@/src/lib/list/stats'
 import { observeMutations } from '@/src/lib/panel/github-dom'
-import { RateLimitError } from '@/src/lib/rate-limit'
+import { RateLimitError, RequestPausedError } from '@/src/lib/rate-limit'
 
 const CONCURRENCY = 3
 // GitHub starts computing an unknown merge state on the first request; one later ask usually gets it.
@@ -150,8 +150,10 @@ export async function startListStats() {
 		const key = statsKey(ref)
 		let entry: StatsEntry
 		try {
-			entry = { ...diffStats(await requestPullRequestDiff(ref)), at: Date.now() }
+			entry = { ...diffStats(await requestPullRequestDiff(ref, { isList: true })), at: Date.now() }
 		} catch (error) {
+			// Held back by the pause: the resume asks again.
+			if (error instanceof PullRequestDiffError && error.isPaused) return
 			// A rate limit says nothing about the pull request: nothing is cached and the row waits for the resume.
 			// The service worker reports a network error as status 0, which during a limit is the limit.
 			if (
@@ -175,6 +177,7 @@ export async function startListStats() {
 			state = await fetchConflictState(ref, () => pause.isPaused())
 			refusals = 0
 		} catch (error) {
+			if (error instanceof RequestPausedError) return
 			// GitHub's 429 may come without CORS headers, so the content script sees only a network error.
 			if (error instanceof RateLimitError) return rateLimited(error.retryAfterMilliseconds)
 			if (error instanceof TypeError && pause.isThrottled()) return rateLimited(undefined, true)

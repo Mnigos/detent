@@ -125,6 +125,18 @@ describe('createRateLimitPause', () => {
 		pause.stop()
 	})
 
+	it('writes its longer pause back when another tab overwrites it with a shorter one', async () => {
+		const pause = await createRateLimitPause(vi.fn())
+		pause.signal(300_000)
+		const until = Date.now() + 300_000
+		await fakeBrowser.storage.local.set({
+			[RATE_LIMIT_KEY]: { until: Date.now() + 60_000, strikes: 1 },
+		})
+		await vi.waitFor(async () => expect(stored()).resolves.toEqual({ until, strikes: 1 }))
+		expect(pause.isPaused(until - 1)).toBe(true)
+		pause.stop()
+	})
+
 	it('ignores a malformed or implausibly distant stored pause', async () => {
 		await fakeBrowser.storage.local.set({ [RATE_LIMIT_KEY]: { until: 'soon' } })
 		const pause = await createRateLimitPause(vi.fn())

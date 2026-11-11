@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RateLimitError } from '../rate-limit'
+import { RateLimitError, RequestPausedError } from '../rate-limit'
 import {
 	allowsRebase,
 	fetchConflictState,
@@ -346,7 +346,7 @@ describe('fetchConflictState', () => {
 			),
 		)
 		vi.stubGlobal('fetch', fetch)
-		await expect(fetchConflictState(ref, () => true)).rejects.toBeInstanceOf(RateLimitError)
+		await expect(fetchConflictState(ref, () => true)).rejects.toBeInstanceOf(RequestPausedError)
 		expect(fetch).toHaveBeenCalledOnce()
 	})
 

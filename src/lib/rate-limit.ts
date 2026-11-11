@@ -11,6 +11,14 @@ export class RateLimitError extends Error {
 	}
 }
 
+/** A request held back because the list is paused for a rate limit: no answer from GitHub at all. */
+export class RequestPausedError extends Error {
+	constructor() {
+		super('Held back while GitHub rate-limits the list')
+		this.name = 'RequestPausedError'
+	}
+}
+
 const RATE_LIMIT_MESSAGE = /rate limit/i
 
 /** Retry-After as delay seconds or an HTTP date, else the reset time of an exhausted rate limit. */

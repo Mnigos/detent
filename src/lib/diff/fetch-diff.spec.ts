@@ -53,18 +53,31 @@ describe('fetchPullRequestDiff', () => {
 		await expect(fetchPullRequestDiff(location)).rejects.toMatchObject({ rateLimit: undefined })
 	})
 
-	it('does not retry a 5xx while the lists are paused for a rate limit', async () => {
+	it("holds a list's 5xx retry while the lists are paused, but not the panel's", async () => {
 		vi.useFakeTimers()
 		vi.mocked(browser.storage.local.get).mockResolvedValue({
 			rateLimitedUntil: { until: Date.now() + 60_000, strikes: 1 },
 		} as never)
 		const fetchMock = vi.fn().mockResolvedValue(new Response('', { status: 503 }))
 		vi.stubGlobal('fetch', fetchMock)
-		const failed = fetchPullRequestDiff(location)
-		const rejection = expect(failed).rejects.toMatchObject({ status: 503, rateLimit: {} })
+		const failed = fetchPullRequestDiff({ ...location, isList: true })
+		const rejection = expect(failed).rejects.toMatchObject({
+			status: 503,
+			rateLimit: undefined,
+			isPaused: true,
+		})
 		await vi.advanceTimersByTimeAsync(2000)
 		await rejection
 		expect(fetchMock).toHaveBeenCalledOnce()
+
+		fetchMock.mockReset()
+		fetchMock
+			.mockResolvedValueOnce(new Response('', { status: 503 }))
+			.mockResolvedValueOnce(new Response('diff --git a/a b/a\n'))
+		const text = fetchPullRequestDiff(location)
+		await vi.advanceTimersByTimeAsync(2000)
+		await expect(text).resolves.toBe('diff --git a/a b/a\n')
+		expect(fetchMock).toHaveBeenCalledTimes(2)
 		vi.mocked(browser.storage.local.get).mockResolvedValue({} as never)
 		vi.useRealTimers()
 	})
@@ -108,6 +121,23 @@ describe('requestPullRequestDiff', () => {
 		vi.mocked(browser.runtime.sendMessage).mockResolvedValue({ status: 404 } as never)
 
 		await expect(requestPullRequestDiff(location)).rejects.toMatchObject({ status: 404 })
+	})
+
+	it('marks a list request and rethrows a retry the pause held back', async () => {
+		vi.mocked(browser.runtime.sendMessage).mockResolvedValue({
+			status: 503,
+			isPaused: true,
+		} as never)
+
+		await expect(requestPullRequestDiff(location, { isList: true })).rejects.toMatchObject({
+			status: 503,
+			isPaused: true,
+		})
+		expect(browser.runtime.sendMessage).toHaveBeenLastCalledWith({
+			type: FETCH_DIFF_MESSAGE,
+			...location,
+			isList: true,
+		})
 	})
 
 	it('rethrows the rate limit the service worker reports', async () => {
