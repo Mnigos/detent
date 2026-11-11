@@ -120,10 +120,13 @@ Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack
   does not report the conflict; most likely the `PULL_REQUEST_MERGE_METHOD` condition fails and the status is not
   `DIRTY` (the answer was not captured). Hence the two requests below; the cache key moved to `mergeConflicts:v3`, so
   the wrong `clean` entries under `mergeConflicts:v2` are not read.
-- Conflicts come from the request without the parameter. detent follows the bundle's order (next point): `DIRTY` is
-  **Conflicts**, `UNKNOWN` asks again later, a failed `PULL_REQUEST_MERGE_METHOD` condition is unknown too (the
-  answer is about a method the repository refuses, so it may hide a conflict; never read as clean), `BEHIND`
-  (GitHub says only "out of date") gets no marker, and a failed conflict condition is **Conflicts**.
+- Conflicts come from the request without the parameter. detent keeps the bundle's order for the statuses (next
+  point): `DIRTY` is **Conflicts**, `UNKNOWN` asks again later, `BEHIND` (GitHub says only "out of date") gets no
+  marker. Two rules are detent's own: a failed `PULL_REQUEST_MERGE_METHOD` condition is unknown too (the answer is
+  about a method the repository refuses, so it may hide a conflict; never read as clean), and a failed conflict
+  condition is **Conflicts** even without conflicting files, as before `b96b472`. The bundle would call the latter
+  `HAS_REBASE_CONFLICTS`; whether GitHub sends it without a merge method for a pull request that merges but does not
+  rebase is not verified (the `Mnigos/soonlane` case above suggests it does not).
 - Rebase: the conflicts section of the bundle (`44-*.js` on github.githubassets.com, checked 2026-11-09) decides
   `if("BEHIND"===t)return"OUT_OF_DATE";if("UNKNOWN"===t)return"PENDING";if("FAILED"===n.result&&0===s.length)return"HAS_REBASE_CONFLICTS";`
   … `"DIRTY"===t&&"FAILED"===n.result` → `"HAS_CONFLICTS"`, with `t` the merge state status, `n` the conflict
