@@ -21,7 +21,7 @@ published in the Chrome Web Store and to builds from this repository.
   are kept, with the head commit the list showed; the diff text is discarded. The head commits come
   from the data GitHub puts in the list page; after GitHub switches the list to another filter or
   page without reloading it, the extension asks `github.com` once for that page's list data, as
-  GitHub's own list does. Nothing from the list goes to OpenRouter.
+  GitHub's own list does. Nothing from the list goes to a model.
 - **Lines of code in the pull request header.** On every tab of a pull request, the extension shows
   how many of the changed lines are code next to GitHub's own count. It reuses the counts stored for
   the head commit the page shows, or the diff it already downloaded for the review steps; otherwise
@@ -34,16 +34,28 @@ published in the Chrome Web Store and to builds from this repository.
   rebased, and whether unresolved conversations block the merge is kept, with the head commit it was
   read for. No comment or thread content is read. Signed out it asks nothing.
   The "Show diff size and conflicts on pull request lists, and code lines in pull request headers" switch in the popup turns these and the header's lines of code off.
-- **Model requests.** Only if you saved an OpenRouter API key in the popup, requests go directly
-  from your browser to `openrouter.ai` with your key:
+- **Model requests.** Only if you set up a model provider in the popup, requests go directly from
+  your browser to that provider: to `openrouter.ai` with your OpenRouter API key, or to
+  `api.openai.com` under your ChatGPT account when you chose ChatGPT and signed in. Each request
+  carries:
   - to name and order the review steps: the pull request title and description, a condensed list of
     the changed files and short diff excerpts;
   - for Priority Review, once it is shown on a pull request's Changes page: the pull request title
     and description, the changed file paths with their status (added, modified,
     deleted, renamed) and line counts, and the same diff excerpts.
 
-  Without a key no request leaves the browser for a model: the steps come from the file structure
-  and the priorities from file paths and change sizes.
+  Without a provider no request leaves the browser for a model: the steps come from the file
+  structure and the priorities from file paths and change sizes.
+- **ChatGPT sign-in.** "Continue with ChatGPT" opens OpenAI's sign-in page in a new tab. You sign in
+  there, not in detent; detent never sees your password. OpenAI sends back a one-time code, which
+  the extension exchanges at `auth.openai.com` for tokens. The code goes from OpenAI's page to an
+  extension page inside the browser and is never sent to any local program. Requests to OpenAI's
+  Responses API set `store: false`, so OpenAI is asked not to keep the responses, and they use your
+  ChatGPT plan: they count toward its usage limits, which you can review and cap for detent at
+  https://chatgpt.com/settings/usage. Detent asks for the scopes `openid profile email
+  offline_access resource.invoke chatgpt.tokens.use.direct`. This gives it your account's email
+  address and the right to send model requests on your plan. It gets no access to your ChatGPT
+  conversations.
 - **Viewed state and position.** Which files you marked as viewed and where you are in the review
   are read from the GitHub page and kept in the browser's session storage for the current pull
   request.
@@ -52,7 +64,8 @@ published in the Chrome Web Store and to builds from this repository.
 
 Everything the extension stores stays in your browser's extension storage:
 
-- your OpenRouter API key, the chosen model and the two switches of the popup,
+- your OpenRouter API key, the chosen provider, the chosen OpenRouter and ChatGPT models and the
+  two switches of the popup,
 - cached step groupings, per pull request, model and diff revision, so a model is not asked twice
   for the same diff (the last five revisions of each pull request),
 - cached Priority Review rankings, per pull request, model and diff revision (the last five
@@ -68,7 +81,14 @@ Everything the extension stores stays in your browser's extension storage:
   commit and when that was read, reused for 10
   minutes unless the list shows a newer commit, and capped at 500 pull requests,
 - when GitHub last rate-limited the list requests and until when they wait, so other tabs wait too,
-- a local counter of the tokens and cost your requests to OpenRouter reported.
+- a local counter of the tokens and cost your requests to OpenRouter reported, and a count of the
+  requests sent on your ChatGPT plan,
+- when you signed in with ChatGPT: the client ID OpenAI issued to detent, your account's ID and
+  email address from the ID token, the access, refresh and ID tokens, and a random ID for this
+  browser profile (`ext_agent_host_id`) that OpenAI uses to tell installs apart. These sit in the
+  extension's own IndexedDB database, which only detent's service worker opens. Pages you visit and
+  detent's script on github.com cannot read it. The access and refresh tokens never appear in a
+  URL or a log; the ID token goes only to OpenAI's sign-in page, as a hint for the next sign-in.
 
 The extension has no server of its own. It sends nothing to the author or any analytics service.
 
@@ -77,20 +97,33 @@ The extension has no server of its own. It sends nothing to the author or any an
 - **GitHub** serves the pages and diffs you open, under GitHub's own terms and privacy policy.
 - **OpenRouter** receives the model requests described above when you configured a key, under
   OpenRouter's terms and privacy policy and those of the model provider you chose.
+- **OpenAI** receives the sign-in and the model requests described above when you chose ChatGPT
+  and signed in, under OpenAI's terms and privacy policy.
 
 ## Permissions
 
-- `storage`: the settings, caches and counter listed above.
+- `storage`: the settings, caches and counters listed above.
+- `declarativeNetRequestWithHostAccess`: one rule that turns the ChatGPT sign-in's return address,
+  `http://127.0.0.1:47801/auth/callback`, into detent's own callback page before the browser sends
+  anything there.
 - `https://github.com/*`: reading pull request pages and pull request lists, rendering the review
   steps, diff sizes and conflict markers in them, downloading diffs and reading merge box states.
 - `https://patch-diff.githubusercontent.com/*`: following GitHub's redirect for those diff
   downloads.
-- `https://openrouter.ai/*`: the optional model requests.
+- `https://openrouter.ai/*`: the optional model requests to OpenRouter.
+- `https://auth.openai.com/*`: the ChatGPT sign-in, token refresh, sign-out and the keys that
+  verify OpenAI's ID tokens.
+- `https://api.openai.com/*`: the optional model requests to OpenAI and the list of models your
+  ChatGPT account may use.
+- `http://127.0.0.1/*`: required for the redirect rule above. Detent never sends a request to
+  127.0.0.1.
 
 ## Removing data
 
-Remove the extension to delete everything it stored. Clearing the key in the popup stops all model
-requests. The usage counter has its own reset in the popup.
+Remove the extension to delete everything it stored. Clearing the OpenRouter key stops requests to
+OpenRouter. "Sign out" in the popup asks OpenAI to end the session, then deletes the tokens; the
+issued client ID and your account ID stay so the next sign-in returns to the same registration. You
+can also disconnect detent in ChatGPT's settings. Each usage counter has its own reset in the popup.
 
 ## Contact
 
