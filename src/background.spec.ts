@@ -167,14 +167,60 @@ describe('background list messages', () => {
 		const listReply = vi.fn()
 		const panelReply = vi.fn()
 		expect(listener({ type: 'detent:fetch-diff', ...ref, isList: true }, {}, listReply)).toBe(true)
+		await vi.waitFor(() => expect(listReply).toHaveBeenCalledExactlyOnceWith({ text: 'list diff' }))
 		expect(listener({ type: 'detent:fetch-diff', ...ref }, {}, panelReply)).toBe(true)
 
-		await vi.waitFor(() => expect(listReply).toHaveBeenCalledExactlyOnceWith({ text: 'list diff' }))
 		await vi.waitFor(() =>
 			expect(panelReply).toHaveBeenCalledExactlyOnceWith({ text: 'panel diff' }),
 		)
 		expect(list.diff).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ref))
 		expect(fetchPullRequestDiff).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ref))
+	})
+
+	it('downloads a diff the panel and the header ask for at the same time once', async () => {
+		vi.mocked(fetchPullRequestDiff).mockResolvedValue(
+			'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n-old\n+new\n+\n',
+		)
+		const panelReply = vi.fn()
+		const headerReply = vi.fn()
+		expect(listener({ type: 'detent:fetch-diff', ...ref }, {}, panelReply)).toBe(true)
+		expect(listener({ type: 'detent:fetch-diff-stats', ...ref }, {}, headerReply)).toBe(true)
+
+		await vi.waitFor(() => expect(headerReply).toHaveBeenCalledOnce())
+		expect(headerReply).toHaveBeenCalledWith({
+			stats: expect.objectContaining({
+				additions: 2,
+				deletions: 1,
+				files: 1,
+				code: { additions: 1, deletions: 1 },
+			}),
+		})
+		await vi.waitFor(() => expect(panelReply).toHaveBeenCalledOnce())
+		expect(fetchPullRequestDiff).toHaveBeenCalledOnce()
+		expect(list.diff).not.toHaveBeenCalled()
+	})
+
+	it("joins the header's queued download, and sends its own when the queue held it back", async () => {
+		let release!: (text: string) => void
+		list.diff.mockReturnValueOnce(new Promise((resolve) => (release = resolve)))
+		const headerReply = vi.fn()
+		const panelReply = vi.fn()
+		listener({ type: 'detent:fetch-diff-stats', ...ref }, {}, headerReply)
+		listener({ type: 'detent:fetch-diff', ...ref }, {}, panelReply)
+		release('')
+		await vi.waitFor(() => expect(panelReply).toHaveBeenCalledExactlyOnceWith({ text: '' }))
+		expect(fetchPullRequestDiff).not.toHaveBeenCalled()
+
+		list.diff.mockRejectedValueOnce(new PullRequestDiffError(0, undefined, true))
+		vi.mocked(fetchPullRequestDiff).mockResolvedValue('own diff')
+		const heldReply = vi.fn()
+		const ownReply = vi.fn()
+		listener({ type: 'detent:fetch-diff-stats', ...ref }, {}, heldReply)
+		listener({ type: 'detent:fetch-diff', ...ref }, {}, ownReply)
+		await vi.waitFor(() => expect(ownReply).toHaveBeenCalledExactlyOnceWith({ text: 'own diff' }))
+		await vi.waitFor(() =>
+			expect(heldReply).toHaveBeenCalledExactlyOnceWith({ status: 0, isPaused: true }),
+		)
 	})
 
 	it('answers a merge box request with its state, or with what stopped it', async () => {

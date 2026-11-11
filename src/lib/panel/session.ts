@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser'
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import { digestText } from '../diff/digest'
-import { requestPullRequestDiff } from '../diff/fetch-diff'
+import { requestPageDiff } from '../diff/page-diff'
 import { parseUnifiedDiff } from '../diff/parse-diff'
 import { buildSkeleton } from '../layers/build-skeleton'
 import { condenseForGrouping, diffExcerpts } from '../layers/condense'
@@ -57,7 +57,7 @@ export async function createReviewSession(
 	readViewed: (anchorIds: ReadonlyMap<string, string>) => ReadonlySet<string>,
 	{ withPriorities = false }: ReviewSessionOptions = {},
 ): Promise<ReviewSession> {
-	const text = await requestPullRequestDiff(location)
+	const text = await requestPageDiff(location)
 	const files = parseUnifiedDiff(text)
 	const sizes = new Map(files.map((file) => [file.path, file]))
 	const skeleton = buildSkeleton(files, buildEdges(files), buildCochangeEdges(files))

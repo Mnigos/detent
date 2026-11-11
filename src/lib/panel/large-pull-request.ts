@@ -12,9 +12,9 @@ export interface PullRequestSize {
 const COUNTER = '.Counter, [class*="Counter"], [data-component="counter"]'
 const VIEWED_SUMMARY = '[class*="ViewedFileProgress-module__ProgressContainer"] + .sr-only'
 const VIEWED_TOTAL = /^\s*\d[\d,]* of (\d[\d,]*) files? viewed\s*$/
-const LINES_SUMMARY = /^\s*Lines changed: (\d[\d,]*) additions? & (\d[\d,]*) deletions?\s*$/
+export const LINES_SUMMARY = /^\s*Lines changed: (\d[\d,]*) additions? & (\d[\d,]*) deletions?\s*$/
 // Each file header on the Changes page states its own lines changed; only the pull request's count.
-const FILE_PART =
+export const FILE_PART =
 	'[data-diff-header-wrapper], [role="region"][id^="diff-"], [role="tree"], .js-file'
 const SIZE_POLL_MILLISECONDS = 200
 const SIZE_WAIT_MILLISECONDS = 5000

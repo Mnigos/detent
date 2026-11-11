@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser'
+import { startHeaderStats } from '@/src/header/mount'
 import { parsePullsListUrl } from '@/src/lib/list/rows'
 import {
 	hideGroupButton,
@@ -13,7 +14,7 @@ import {
 	parsePullRequestUrl,
 	pullRequestScope,
 } from '@/src/lib/pull-request-url'
-import { readSettings } from '@/src/lib/settings'
+import { readSettings, type Settings } from '@/src/lib/settings'
 import { startListStats } from '@/src/list/mount'
 import { startPanel } from '@/src/panel/mount'
 import { startTree } from '@/src/tree/mount'
@@ -50,6 +51,37 @@ export default defineContentScript({
 		// The pull request page the button was shown for; leaving it removes the button at once.
 		let gated: PullRequestLocation | undefined
 
+		// The header's code lines live per pull request, across its tabs, beside whichever view the tab has.
+		let header: { mount: () => void; remove: () => void } | undefined
+		let headerKey = ''
+		let headerGeneration = 0
+
+		// The URL is read when the settings are in, so a navigation made meanwhile is not undone.
+		async function syncHeader(settings: Settings) {
+			const location = parsePullRequestUrl(window.location.href)
+			const key =
+				location && settings.isEnabled && settings.showListStats
+					? `header:${pullRequestScope(location)}`
+					: ''
+			if (key === headerKey) return
+
+			headerKey = key
+			headerGeneration += 1
+			const current = headerGeneration
+			header?.remove()
+			header = undefined
+			if (!location || !key) return
+			try {
+				const next = await startHeaderStats(location)
+				if (current !== headerGeneration) return next.remove()
+
+				header = next
+				header.mount()
+			} catch (error) {
+				console.warn('[detent]', error)
+			}
+		}
+
 		const isShown = (location: PullRequestLocation) => {
 			const now = parsePullRequestUrl(window.location.href)
 
@@ -63,7 +95,9 @@ export default defineContentScript({
 			}
 			const location = parsePullRequestUrl(window.location.href)
 			const list = parsePullsListUrl(window.location.href)
-			const { isEnabled, showListStats } = await readSettings()
+			const settings = await readSettings()
+			const { isEnabled, showListStats } = settings
+			void syncHeader(settings)
 			const view = !isEnabled
 				? undefined
 				: location?.tab === 'files'
