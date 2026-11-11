@@ -207,7 +207,7 @@ describe('fetchConflictState', () => {
 		await expect(fetchConflictState(ref)).resolves.toBe('conflicts')
 		expect(fetch).toHaveBeenCalledWith(
 			DEFAULT_URL,
-			expect.objectContaining({ credentials: 'same-origin' }),
+			expect.objectContaining({ credentials: 'include' }),
 		)
 	})
 
@@ -257,7 +257,7 @@ describe('fetchConflictState', () => {
 		expect(askedUrls(fetch)).toEqual([DEFAULT_URL, REBASE_URL])
 		expect(fetch).toHaveBeenLastCalledWith(
 			REBASE_URL,
-			expect.objectContaining({ credentials: 'same-origin' }),
+			expect.objectContaining({ credentials: 'include' }),
 		)
 	})
 
@@ -339,15 +339,21 @@ describe('fetchConflictState', () => {
 		expect((error as RateLimitError).retryAfterMilliseconds).toBeUndefined()
 	})
 
-	it('does not send the rebase request once the list is paused', async () => {
-		const fetch = vi.fn(async () =>
-			Response.json(
-				mergeBox({ state: 'OPEN', mergeStateStatus: 'CLEAN', viewerMergeActions: rebaseAllowed }),
-			),
-		)
+	it('sends both requests through the given send and passes on a pause it reports for the rebase one', async () => {
+		const send = vi
+			.fn<(url: string, init?: RequestInit) => Promise<Response>>()
+			.mockResolvedValueOnce(
+				Response.json(
+					mergeBox({ state: 'OPEN', mergeStateStatus: 'CLEAN', viewerMergeActions: rebaseAllowed }),
+				),
+			)
+			.mockRejectedValueOnce(new RequestPausedError())
+		const fetch = vi.fn()
 		vi.stubGlobal('fetch', fetch)
-		await expect(fetchConflictState(ref, () => true)).rejects.toBeInstanceOf(RequestPausedError)
-		expect(fetch).toHaveBeenCalledOnce()
+		await expect(fetchConflictState(ref, send)).rejects.toBeInstanceOf(RequestPausedError)
+		expect(send).toHaveBeenCalledTimes(2)
+		expect(send.mock.calls[1]?.[0]).toContain('merge_method=REBASE')
+		expect(fetch).not.toHaveBeenCalled()
 	})
 
 	it('answers unknown for a server error or a body that is not JSON', async () => {

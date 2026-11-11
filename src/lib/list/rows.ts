@@ -31,6 +31,10 @@ export interface PullRow {
 	number: number
 	/** Open or draft; a closed or merged pull request cannot gain conflicts. */
 	isOpen: boolean
+	/** A draft is not ready to merge, so its conflicts are not asked for. */
+	isDraft: boolean
+	/** The row's <li>. */
+	item: Element
 	/** The row's meta line: "#1277 · author opened … · checks". */
 	meta: HTMLElement
 }
@@ -64,6 +68,9 @@ function metaLine(row: Element): HTMLElement | null {
 const isOpenRow = (row: Element) =>
 	Boolean(row.querySelector('svg.octicon-git-pull-request, svg.octicon-git-pull-request-draft'))
 
+const isDraftRow = (row: Element) =>
+	Boolean(row.querySelector('svg.octicon-git-pull-request-draft'))
+
 export function findPullRows(root: ParentNode = document): PullRow[] {
 	const rows: PullRow[] = []
 	for (const link of root.querySelectorAll<HTMLAnchorElement>('li a[href*="/pull/"]')) {
@@ -78,7 +85,15 @@ export function findPullRows(root: ParentNode = document): PullRow[] {
 		const meta = owner && repo && number ? metaLine(item) : null
 		if (!meta || !owner || !repo || rows.some((pull) => pull.meta === meta)) continue
 
-		rows.push({ owner, repo, number: Number(number), isOpen: isOpenRow(item), meta })
+		rows.push({
+			owner,
+			repo,
+			number: Number(number),
+			isOpen: isOpenRow(item),
+			isDraft: isDraftRow(item),
+			item,
+			meta,
+		})
 	}
 
 	return rows
