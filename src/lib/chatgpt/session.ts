@@ -37,10 +37,12 @@ export class SignInRequired extends Error {
 
 // The last access token the API refused. Kept in memory only, so marking it never writes the
 // credential record and cannot race a refresh or a sign-out.
-let rejectedToken: string | undefined
+const rejectedTokens = new Set<string>()
+// While a sign-out runs, no request starts and no refresh rotates the token being revoked.
+let isSigningOut = false
 
 const isFresh = (tokens: Tokens, now = Date.now()) =>
-	tokens.accessToken !== rejectedToken && tokens.expiresAt - REFRESH_MARGIN_MILLISECONDS > now
+	!rejectedTokens.has(tokens.accessToken) && tokens.expiresAt - REFRESH_MARGIN_MILLISECONDS > now
 
 /** Drops the tokens and keeps the registration, so the next sign-in reauthorizes it. */
 async function endSession({ tokens: _tokens, ...registration }: Account, notice: string) {
@@ -54,7 +56,7 @@ async function refresh(): Promise<string> {
 	// Read again: a refresh that finished a moment ago already rotated the refresh token.
 	const account = await readAccount()
 	const tokens = account?.tokens
-	if (!account || !tokens) throw new SignInRequired()
+	if (!account || !tokens || isSigningOut) throw new SignInRequired()
 	if (isFresh(tokens)) return tokens.accessToken
 	if (!tokens.refreshToken) {
 		await endSession(account, SIGN_IN_AGAIN)
@@ -110,6 +112,9 @@ async function refresh(): Promise<string> {
 		tokens: { ...next, scopes: next.scopes.length ? next.scopes : tokens.scopes },
 	})
 
+	// Saved so a sign-out that began meanwhile revokes this latest token, but no longer handed out.
+	if (isSigningOut) throw new SignInRequired()
+
 	return next.accessToken
 }
 
@@ -119,7 +124,8 @@ async function refresh(): Promise<string> {
  */
 export async function accessToken(): Promise<string> {
 	const tokens = (await readAccount())?.tokens
-	if (!tokens) throw new SignInRequired()
+	// Checked after the read: a sign-out that began meanwhile wins.
+	if (!tokens || isSigningOut) throw new SignInRequired()
 	if (isFresh(tokens)) return tokens.accessToken
 
 	refreshing ??= refresh().finally(() => {
@@ -130,7 +136,7 @@ export async function accessToken(): Promise<string> {
 
 /** The API refused the access token; the next call refreshes it before trying again. */
 export function invalidateAccessToken(rejected: string) {
-	rejectedToken = rejected
+	rejectedTokens.add(rejected)
 }
 
 async function revoke(clientId: string, refreshToken: string): Promise<boolean> {
@@ -159,6 +165,16 @@ async function revoke(clientId: string, refreshToken: string): Promise<boolean> 
  * and host ID stay for the next sign-in, as the docs ask.
  */
 export async function signOut(): Promise<{ revoked: boolean }> {
+	isSigningOut = true
+	try {
+		return await endRenewableSession()
+	} finally {
+		isSigningOut = false
+	}
+}
+
+async function endRenewableSession(): Promise<{ revoked: boolean }> {
+	// A refresh already running finishes first, so the token revoked below is the latest one.
 	await refreshing?.catch(() => undefined)
 	const account = await readAccount()
 	if (!account?.tokens) return { revoked: true }
