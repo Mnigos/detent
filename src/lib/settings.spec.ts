@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { DEFAULT_MODEL, readSettings, SETTINGS_KEY, writeSettings } from './settings'
 
@@ -95,5 +95,19 @@ describe('writeSettings', () => {
 		await expect(fakeBrowser.storage.local.get(SETTINGS_KEY)).resolves.toEqual({
 			[SETTINGS_KEY]: expected,
 		})
+	})
+
+	it('keeps both of two changes made before either is saved', async () => {
+		await Promise.all([writeSettings({ provider: 'chatgpt' }), writeSettings({ isEnabled: false })])
+
+		await expect(readSettings()).resolves.toMatchObject({ provider: 'chatgpt', isEnabled: false })
+	})
+
+	it('keeps writing after a write fails', async () => {
+		const set = vi.spyOn(fakeBrowser.storage.local, 'set').mockRejectedValueOnce(new Error('quota'))
+
+		await expect(writeSettings({ provider: 'chatgpt' })).rejects.toThrow('quota')
+		set.mockRestore()
+		await expect(writeSettings({ isEnabled: false })).resolves.toMatchObject({ isEnabled: false })
 	})
 })
