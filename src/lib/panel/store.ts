@@ -198,8 +198,11 @@ function hideTests(state: PanelState, isHiding: boolean): PanelState {
 		return candidate !== undefined && !isTestFile(candidate)
 	}
 	const target = order.slice(from + 1).find(shown) ?? order.slice(0, from).reverse().find(shown)
+	const moved = showSections({ ...next, ...target }, source)
+	// The cursor moved to another file, so a folded section it lands in opens like any other move.
+	const id = moved.layers[moved.layerIndex]?.id
 
-	return showSections({ ...next, ...target }, source)
+	return id && moved.collapsedSections.has(id) ? unfold(moved, id) : moved
 }
 
 function setMode(state: PanelState, mode: ViewMode): PanelState {
