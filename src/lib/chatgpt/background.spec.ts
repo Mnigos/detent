@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { browser } from 'wxt/browser'
-import { vaultStore } from '../../test/memory-vault'
+import { vault, vaultStore } from '../../test/memory-vault'
 import {
 	chatGptStatus,
 	handleChatGptMessage,
@@ -96,6 +96,15 @@ describe('handleChatGptMessage', () => {
 
 		await expect(send({ type: 'detent:chatgpt:sign-in' })).resolves.toMatchObject({ ok: false })
 		expect(browser.tabs.create).not.toHaveBeenCalled()
+	})
+
+	it('answers a failed sign-out or status with nothing, never a signed-out look-alike', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		vi.mocked(signOut).mockRejectedValueOnce(new Error('vault write failed'))
+		await expect(send({ type: 'detent:chatgpt:sign-out' })).resolves.toBeUndefined()
+
+		vi.spyOn(vault, 'get').mockRejectedValueOnce(new Error('vault read failed'))
+		await expect(send({ type: 'detent:chatgpt:status' })).resolves.toBeUndefined()
 	})
 
 	it('hands the callback URL to the sign-in', async () => {
