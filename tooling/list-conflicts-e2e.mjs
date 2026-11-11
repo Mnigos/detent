@@ -293,7 +293,7 @@ async function run(name, url, { signedIn, rateLimited = false }) {
 // Moves every cached entry back in time, as if it had been stored that long ago.
 const ageCaches = (worker, milliseconds) =>
 	worker.evaluate(async (milliseconds) => {
-		const stored = await chrome.storage.local.get(['diffStats', 'mergeConflicts:v3'])
+		const stored = await chrome.storage.local.get(['diffStats:v2', 'mergeConflicts:v3'])
 		for (const cache of Object.values(stored))
 			for (const entry of Object.values(cache)) entry.at -= milliseconds
 		await chrome.storage.local.set(stored)
@@ -348,7 +348,7 @@ async function requestCost() {
 	const reload = await load(reloadFromTop)
 	await ageCaches(worker, 15 * MINUTE)
 	const later = await load(reloadFromTop)
-	const stored = await worker.evaluate(() => chrome.storage.local.get('diffStats'))
+	const stored = await worker.evaluate(() => chrome.storage.local.get('diffStats:v2'))
 	const navigated = await load(async () => {
 		await page.evaluate(() =>
 			window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' }),
@@ -390,7 +390,8 @@ async function requestCost() {
 			listData: count(later.requests, 'list-data'),
 			nearOpen: later.rows.filter((row) => row.near && isOpenRow(row)).map((row) => row.number),
 		},
-		storedWithHead: Object.values(stored.diffStats ?? {}).filter((entry) => entry.headSha).length,
+		storedWithHead: Object.values(stored['diffStats:v2'] ?? {}).filter((entry) => entry.headSha)
+			.length,
 		pageTwo: {
 			url: page.url(),
 			listData: count(navigated.requests, 'list-data'),
