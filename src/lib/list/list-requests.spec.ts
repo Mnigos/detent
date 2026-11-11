@@ -52,6 +52,33 @@ describe('createListRequests', () => {
 		])
 	})
 
+	it('holds the slot until the body has arrived, so slow downloads still count against the three', async () => {
+		const bodies: ReadableStreamDefaultController<Uint8Array>[] = []
+		const fetch = vi.fn(
+			async () =>
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start: (controller) => {
+							bodies.push(controller)
+						},
+					}),
+				),
+		)
+		vi.stubGlobal('fetch', fetch)
+		const list = createListRequests()
+		const diffs = [1, 2, 3, 4].map((number) => list.diff({ ...ref, number }))
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(fetch).toHaveBeenCalledTimes(3)
+
+		bodies[0]?.enqueue(new TextEncoder().encode('diff --git a/a b/a\n'))
+		bodies[0]?.close()
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(fetch).toHaveBeenCalledTimes(4)
+		await expect(diffs[0]).resolves.toBe('diff --git a/a b/a\n')
+		for (const body of bodies.slice(1)) body.close()
+		await expect(Promise.all(diffs.slice(1))).resolves.toEqual(['', '', ''])
+	})
+
 	it('keeps diffs, merge boxes and list data of every tab to three requests at once', async () => {
 		const github = stubGitHub((url) =>
 			url.endsWith('.diff')
