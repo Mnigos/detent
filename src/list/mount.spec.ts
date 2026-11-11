@@ -437,6 +437,48 @@ describe('list rate limits', () => {
 		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
 	})
 
+	it('stops treating network errors as the limit after one inferred pause', async () => {
+		renderList([{ number: 1 }])
+		vi.mocked(requestPullRequestDiff).mockRejectedValueOnce(rateLimit(60_000)).mockResolvedValue('')
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		const fetch = vi.fn(async (_url: string) => {
+			await new Promise((done) => setTimeout(done, 1000))
+			throw new TypeError('Failed to fetch')
+		})
+		vi.stubGlobal('fetch', fetch)
+		await mount()
+		await settle()
+
+		// t=1 s during the pause, t=61 s within its grace (an inferred pause of two minutes), t=182 s a plain
+		// error (unknown), t=197 s its single retry; then the row is left alone and the diff pool runs freely.
+		await vi.advanceTimersByTimeAsync(400_000)
+		await settle()
+		expect(fetch).toHaveBeenCalledTimes(4)
+		expect(diffCalls()).toEqual([1, 1])
+		await expect(readStatsCache()).resolves.toMatchObject({ 'o/r/1': { additions: 0 } })
+	})
+
+	it('holds the rebase follow-up request until the pause is over', async () => {
+		renderList([{ number: 1 }])
+		vi.mocked(requestPullRequestDiff).mockRejectedValueOnce(rateLimit(60_000)).mockResolvedValue('')
+		const fetch = stubMergeBox({ 1: 'REBASE_BLOCKED' }, 1000)
+		await mount()
+		await settle()
+		await vi.advanceTimersByTimeAsync(58_000)
+		expect(fetch.mock.calls.map(([url]) => url.includes('merge_method=REBASE'))).toEqual([false])
+
+		await vi.advanceTimersByTimeAsync(2000)
+		await settle()
+		await vi.advanceTimersByTimeAsync(2000)
+		await settle()
+		expect(fetch.mock.calls.map(([url]) => url.includes('merge_method=REBASE'))).toEqual([
+			false,
+			false,
+			true,
+		])
+		expect(markers().map(({ state }) => state)).toEqual(['rebase-blocked'])
+	})
+
 	it("honours another tab's pause, stored before the list opens or written while it runs", async () => {
 		await fakeBrowser.storage.local.set({
 			[RATE_LIMIT_KEY]: { until: Date.now() + 90_000, strikes: 1 },
@@ -467,6 +509,25 @@ describe('list rate limits', () => {
 })
 
 describe('list request cost', () => {
+	it('starts cleanly when a stored pause ends while the caches load', async () => {
+		await fakeBrowser.storage.local.set({
+			[RATE_LIMIT_KEY]: { until: Date.now() + 40, strikes: 1 },
+		})
+		const get = fakeBrowser.storage.local.get.bind(fakeBrowser.storage.local)
+		vi.spyOn(fakeBrowser.storage.local, 'get').mockImplementation((async (keys: string) => {
+			if (keys !== RATE_LIMIT_KEY) await new Promise((done) => setTimeout(done, 150))
+			return get(keys)
+		}) as never)
+
+		renderList([{ number: 1 }])
+		const fetch = stubMergeBox({ 1: 'DIRTY' })
+		await mount()
+
+		await vi.waitFor(() => expect(marked()).toEqual(['https://github.com/o/r/pull/1']))
+		expect(fetch).toHaveBeenCalledOnce()
+		vi.restoreAllMocks()
+	})
+
 	it('still caches a real failure for its ten minutes, without pausing the list', async () => {
 		renderList([1, 2, 3, 4].map((number) => ({ number })))
 		vi.mocked(requestPullRequestDiff).mockRejectedValue(new PullRequestDiffError(404))

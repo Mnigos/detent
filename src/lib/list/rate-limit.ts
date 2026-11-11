@@ -11,10 +11,14 @@ const THROTTLED_GRACE_MILLISECONDS = 60_000
 // A stored pause further out than this comes from a changed wall clock, not from GitHub.
 const MAX_STORED_MILLISECONDS = 60 * 60_000
 
-/** `until` is a wall clock time, so other tabs can read it; `strikes` counts limits in a row. */
+/**
+ * `until` is a wall clock time, so other tabs can read it; `strikes` counts limits in a row. `inferred` marks a pause
+ * started only by a network error, which never earns the grace after it, so such errors cannot pause the list forever.
+ */
 export interface RateLimitState {
 	until: number
 	strikes: number
+	inferred?: true
 }
 
 const isState = (value: unknown): value is RateLimitState =>
@@ -22,6 +26,20 @@ const isState = (value: unknown): value is RateLimitState =>
 	value !== null &&
 	typeof (value as RateLimitState).until === 'number' &&
 	typeof (value as RateLimitState).strikes === 'number'
+
+const pauseState = (until: number, strikes: number, inferred: boolean): RateLimitState =>
+	inferred ? { until, strikes, inferred } : { until, strikes }
+
+/** Whether a stored pause, of any tab, is running now. For callers outside the list, such as the service worker. */
+export async function isRateLimitPaused(now = Date.now()) {
+	try {
+		const stored = (await browser.storage.local.get(RATE_LIMIT_KEY))[RATE_LIMIT_KEY]
+
+		return isState(stored) && now < stored.until && stored.until <= now + MAX_STORED_MILLISECONDS
+	} catch {
+		return false
+	}
+}
 
 /** Retry-After, or a minute, doubled for every repeat up to ten minutes; a longer Retry-After always wins. */
 export const pauseLength = (strikes: number, retryAfterMilliseconds?: number) =>
@@ -76,22 +94,25 @@ export async function createRateLimitPause(onResume: () => void) {
 
 	return {
 		isPaused: (now = Date.now()) => now < state.until,
-		isThrottled: (now = Date.now()) => now < state.until + THROTTLED_GRACE_MILLISECONDS,
+		isThrottled: (now = Date.now()) =>
+			now < state.until + (state.inferred ? 0 : THROTTLED_GRACE_MILLISECONDS),
 		/**
-		 * Starts a pause, or makes a running one last until Retry-After. Returns the new pause's length when this
-		 * signal started one, undefined when a pause was already running.
+		 * Starts a pause, or makes a running one last until Retry-After. `isInferred`: the signal is a network error
+		 * taken for the limit, not GitHub's answer. Returns the new pause's length when this signal started one,
+		 * undefined when a pause was already running.
 		 */
-		signal(retryAfterMilliseconds?: number) {
+		signal(retryAfterMilliseconds?: number, isInferred = false) {
 			const now = Date.now()
 			let started: number | undefined
 			if (now < state.until) {
-				if (retryAfterMilliseconds === undefined || now + retryAfterMilliseconds <= state.until)
-					return undefined
-				state = { ...state, until: now + retryAfterMilliseconds }
+				const until = Math.max(state.until, now + (retryAfterMilliseconds ?? 0))
+				const inferred = Boolean(state.inferred) && isInferred
+				if (until === state.until && inferred === Boolean(state.inferred)) return undefined
+				state = pauseState(until, state.strikes, inferred)
 			} else {
 				const strikes = now < state.until + REPEAT_WINDOW_MILLISECONDS ? state.strikes + 1 : 1
 				started = pauseLength(strikes, retryAfterMilliseconds)
-				state = { until: now + started, strikes }
+				state = pauseState(now + started, strikes, isInferred)
 			}
 			schedule()
 			browser.storage.local

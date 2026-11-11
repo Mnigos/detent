@@ -339,6 +339,17 @@ describe('fetchConflictState', () => {
 		expect((error as RateLimitError).retryAfterMilliseconds).toBeUndefined()
 	})
 
+	it('does not send the rebase request once the list is paused', async () => {
+		const fetch = vi.fn(async () =>
+			Response.json(
+				mergeBox({ state: 'OPEN', mergeStateStatus: 'CLEAN', viewerMergeActions: rebaseAllowed }),
+			),
+		)
+		vi.stubGlobal('fetch', fetch)
+		await expect(fetchConflictState(ref, () => true)).rejects.toBeInstanceOf(RateLimitError)
+		expect(fetch).toHaveBeenCalledOnce()
+	})
+
 	it('answers unknown for a server error or a body that is not JSON', async () => {
 		vi.stubGlobal('fetch', async () => new Response('', { status: 502 }))
 		await expect(fetchConflictState(ref)).resolves.toBe('unknown')
