@@ -1,6 +1,7 @@
 import {
 	type Account,
 	API_URL,
+	cancelSignIns,
 	clearNotice,
 	forgetAccount,
 	postToken,
@@ -139,7 +140,7 @@ export function invalidateAccessToken(rejected: string) {
 	rejectedTokens.add(rejected)
 }
 
-async function revoke(clientId: string, refreshToken: string): Promise<boolean> {
+export async function revoke(clientId: string, refreshToken: string): Promise<boolean> {
 	for (let attempt = 0; attempt < 3; attempt++) {
 		if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt))
 		try {
@@ -167,6 +168,7 @@ async function revoke(clientId: string, refreshToken: string): Promise<boolean> 
 export async function signOut(): Promise<{ revoked: boolean }> {
 	isSigningOut = true
 	try {
+		await cancelSignIns()
 		return await endRenewableSession()
 	} finally {
 		isSigningOut = false

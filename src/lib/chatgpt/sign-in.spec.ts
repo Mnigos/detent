@@ -1,9 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSigner, idClaims, type Signer } from '../../test/id-tokens'
 import { vaultStore } from '../../test/memory-vault'
-import { type Account, JWKS_URL, REDIRECT_URI, TOKEN_URL } from './account'
+import { type Account, JWKS_URL, REDIRECT_URI, REVOKE_URL, TOKEN_URL } from './account'
 import { forgetSigningKeys } from './id-token'
 import { challengeOf } from './pkce'
+import { signOut } from './session'
 import {
 	beginSignIn,
 	completeSignIn,
@@ -30,9 +31,11 @@ beforeEach(() => {
 		vi.fn(async (url: string) =>
 			url === JWKS_URL
 				? Response.json(signer.jwks)
-				: url === TOKEN_URL
-					? tokenAnswer()
-					: new Response(null, { status: 404 }),
+				: url === REVOKE_URL
+					? new Response(null, { status: 200 })
+					: url === TOKEN_URL
+						? tokenAnswer()
+						: new Response(null, { status: 404 }),
 		),
 	)
 })
@@ -230,6 +233,40 @@ describe('completeSignIn', () => {
 
 		expect(results.filter((result) => result.ok)).toHaveLength(1)
 		expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === TOKEN_URL)).toHaveLength(1)
+	})
+
+	it('refuses a callback for an attempt started before a sign-out', async () => {
+		vaultStore.set('account', { clientId: 'oaiapp_issued', tokens: { refreshToken: 'r0' } })
+		await beginSignIn()
+		const { state } = pending()
+		answerTokens()
+		await signOut()
+
+		await expect(completeSignIn(callback({ code: 'c', state }))).resolves.toMatchObject({
+			ok: false,
+		})
+		expect(account()?.tokens).toBeUndefined()
+	})
+
+	it('revokes instead of saving the tokens of an exchange a sign-out overtook', async () => {
+		await beginSignIn()
+		const { state } = pending()
+		answerTokens()
+		const answer = tokenAnswer
+		let release!: () => void
+		tokenAnswer = () => new Promise((resolve) => (release = () => resolve(answer())))
+		const completing = completeSignIn(callback({ code: 'c', state, client_id: 'oaiapp_issued' }))
+		await vi.waitFor(() => expect(release).toBeDefined())
+		await signOut()
+		release()
+
+		await expect(completing).resolves.toMatchObject({
+			ok: false,
+			message: expect.stringContaining('Signed out while signing in'),
+		})
+		expect(account()?.tokens).toBeUndefined()
+		const revoked = vi.mocked(fetch).mock.calls.find(([url]) => url === REVOKE_URL)
+		expect(new URLSearchParams(String(revoked?.[1]?.body)).get('token')).toBe('refresh-1')
 	})
 
 	it('keeps the issued client ID when the code is not accepted, and says so', async () => {
