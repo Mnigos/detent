@@ -1,6 +1,13 @@
 import { browser } from 'wxt/browser'
+import type { ProviderChoice } from '../settings'
 
 export const USAGE_KEY = 'usage'
+export const RESET_USAGE_MESSAGE = 'detent:usage:reset'
+
+export interface ResetUsageRequest {
+	type: typeof RESET_USAGE_MESSAGE
+	provider: ProviderChoice
+}
 
 /** What this extension has spent on OpenRouter since the counter was last reset. */
 export interface Usage {
@@ -36,9 +43,17 @@ export async function readUsage(): Promise<Usage> {
 
 let pending: Promise<unknown> = Promise.resolve()
 
-// Grouping and ranking answers land together; one queue keeps each read-add-write from losing the other.
+// Grouping and ranking answers land together; one queue keeps each read-add-write from losing the
+// other, and keeps a reset from being undone by a record that read the count before it.
+function enqueue<T>(work: () => Promise<T>): Promise<T> {
+	const write = pending.then(work)
+	pending = write.catch(() => undefined)
+
+	return write
+}
+
 export function recordUsage(delta: UsageDelta): Promise<Usage> {
-	const write = pending.then(async () => {
+	return enqueue(async () => {
 		const previous = await readUsage()
 		const usage: Usage = {
 			requests: previous.requests + 1,
@@ -50,14 +65,9 @@ export function recordUsage(delta: UsageDelta): Promise<Usage> {
 
 		return usage
 	})
-	pending = write.catch(() => undefined)
-
-	return write
 }
 
-export async function resetUsage(): Promise<void> {
-	await browser.storage.local.remove(USAGE_KEY)
-}
+export const resetUsage = () => enqueue(() => browser.storage.local.remove(USAGE_KEY))
 
 // ChatGPT plan usage has no per-request cost to show; its counter is the number of requests.
 export const CHATGPT_USAGE_KEY = 'chatgptUsage'
@@ -71,20 +81,23 @@ export async function readChatGptRequests(): Promise<number> {
 }
 
 export function recordChatGptRequest(): Promise<number> {
-	const write = pending.then(async () => {
+	return enqueue(async () => {
 		const requests = (await readChatGptRequests()) + 1
 		await browser.storage.local.set({ [CHATGPT_USAGE_KEY]: { requests } })
 
 		return requests
 	})
-	pending = write.catch(() => undefined)
-
-	return write
 }
 
-export async function resetChatGptRequests(): Promise<void> {
-	await browser.storage.local.remove(CHATGPT_USAGE_KEY)
-}
+export const resetChatGptRequests = () =>
+	enqueue(() => browser.storage.local.remove(CHATGPT_USAGE_KEY))
+
+/** The popup's reset runs in the worker, in the same queue as the requests it counts. */
+export const requestUsageReset = (provider: ProviderChoice) =>
+	browser.runtime.sendMessage({
+		type: RESET_USAGE_MESSAGE,
+		provider,
+	} satisfies ResetUsageRequest) as Promise<unknown>
 
 /** OpenRouter's `usage` block of a completion, when the request asked for it. */
 export function usageOf(payload: unknown): UsageDelta | undefined {

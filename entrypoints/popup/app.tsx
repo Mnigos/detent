@@ -1,13 +1,7 @@
 import { Suspense, useState } from 'react'
 import { type ChatGptStatus, USAGE_SETTINGS_URL } from '@/src/lib/chatgpt/messages'
 import { PROVIDER_NAMES } from '@/src/lib/model/provider'
-import {
-	EMPTY_USAGE,
-	formatCost,
-	resetChatGptRequests,
-	resetUsage,
-	type Usage,
-} from '@/src/lib/model/usage'
+import { EMPTY_USAGE, formatCost, requestUsageReset, type Usage } from '@/src/lib/model/usage'
 import { type ProviderChoice, type Settings, writeSettings } from '@/src/lib/settings'
 import { ChatGptAccount } from './chatgpt'
 import { OpenRouterSettings } from './openrouter'
@@ -55,13 +49,9 @@ export function App({
 	}
 
 	async function reset() {
-		if (isChatGpt) {
-			await resetChatGptRequests()
-			setChatgptRequests(0)
-			return
-		}
-		await resetUsage()
-		setUsage(EMPTY_USAGE)
+		await requestUsageReset(provider)
+		if (isChatGpt) setChatgptRequests(0)
+		else setUsage(EMPTY_USAGE)
 	}
 
 	return (

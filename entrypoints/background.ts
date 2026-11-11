@@ -1,5 +1,9 @@
 import { browser } from 'wxt/browser'
-import { handleChatGptMessage, installCallbackRule } from '@/src/lib/chatgpt/background'
+import {
+	handleChatGptMessage,
+	installCallbackRule,
+	isExtensionPage,
+} from '@/src/lib/chatgpt/background'
 import { createDiffRequests } from '@/src/lib/diff/diff-requests'
 import {
 	FETCH_DIFF_MESSAGE,
@@ -36,6 +40,12 @@ import {
 	type PrioritizeRequest,
 	resolvePriorities,
 } from '@/src/lib/model/label-priorities'
+import {
+	RESET_USAGE_MESSAGE,
+	type ResetUsageRequest,
+	resetChatGptRequests,
+	resetUsage,
+} from '@/src/lib/model/usage'
 import { errorResponse } from '@/src/lib/rate-limit'
 
 const diffError = (error: unknown) =>
@@ -110,6 +120,14 @@ export default defineBackground(() => {
 					console.warn('[detent] analysis failed', error)
 					sendResponse(undefined)
 				})
+			return true
+		}
+		// Only the popup resets a counter; the worker's queue orders it after any count being written.
+		if (isRequest<ResetUsageRequest>(message, RESET_USAGE_MESSAGE) && isExtensionPage(sender)) {
+			const reset = message.provider === 'chatgpt' ? resetChatGptRequests : resetUsage
+			reset()
+				.then(() => sendResponse(true))
+				.catch(() => sendResponse(false))
 			return true
 		}
 		if (isRequest<PrioritizeRequest>(message, PRIORITIZE_MESSAGE)) {
