@@ -10,7 +10,7 @@ import { readStatsCache, STATS_KEY } from '@/src/lib/list/cache'
 import { RATE_LIMIT_KEY } from '@/src/lib/list/rate-limit'
 import type { DiffStats } from '@/src/lib/list/stats'
 import type { PullRequestLocation } from '@/src/lib/pull-request-url'
-import { embeddedData, reactHeader } from '@/src/test/pull-request-header'
+import { classicHeader, embeddedData, reactHeader } from '@/src/test/pull-request-header'
 import { startHeaderStats } from './mount'
 
 vi.mock('@/src/lib/diff/fetch-diff', async (importOriginal) => ({
@@ -238,5 +238,45 @@ describe('pull request header code lines', () => {
 		switchTab('/o/r/pull/1/commits', HEAD)
 		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']))
 		clock.mockRestore()
+	})
+
+	it('reads the head again when the page data arrives after the URL changed', async () => {
+		await mount()
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']))
+		answer = async () => ({ stats: stats(5) })
+		history.pushState(null, '', '/o/r/pull/1/commits')
+		document.body.append(document.createElement('div'))
+		await new Promise((done) => setTimeout(done, 50))
+		expect(statsRequests()).toHaveLength(1)
+
+		document.body.innerHTML = reactHeader() + embeddedData(1, OLD_HEAD)
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+5−1)']))
+		expect(statsRequests()).toHaveLength(2)
+	})
+
+	it("reads the classic Files changed page's head after a switch from Conversation", async () => {
+		await mount()
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']))
+		answer = async () => ({ stats: stats(5) })
+		history.pushState(null, '', '/o/r/pull/1/files')
+		document.body.innerHTML = classicHeader('/o/r/pull/1', OLD_HEAD)
+
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+5−1)']))
+		await vi.waitFor(async () =>
+			expect((await readStatsCache())['o/r/1']).toMatchObject({ headSha: OLD_HEAD }),
+		)
+	})
+
+	it('falls back to the ten-minute rule when the page no longer says its head commit', async () => {
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: { 'o/r/1': { ...stats(4), at: Date.now() - 60 * 60_000, headSha: HEAD } },
+		})
+		await mount()
+		expect(markerText()).toEqual(['(+4−1)'])
+		history.pushState(null, '', '/o/r/pull/1/commits')
+		document.body.innerHTML = reactHeader()
+
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']))
+		expect(statsRequests()).toHaveLength(1)
 	})
 })
