@@ -53,10 +53,12 @@ describe('ChatGPT request counter', () => {
 		'keeps the %s counter reset after a count that read before it',
 		async (_name, record, reset, key) => {
 			stored[key] = { requests: 3 }
-			const read = vi.mocked(browser.storage.local.get).getMockImplementation()
 			let release!: () => void
 			vi.mocked(browser.storage.local.get).mockImplementationOnce(
-				(keys) => new Promise((resolve) => (release = () => resolve(read?.(keys)))),
+				(keys) =>
+					new Promise((resolve) => {
+						release = () => resolve({ [String(keys)]: stored[String(keys)] })
+					}),
 			)
 			const counting = record()
 			await vi.waitFor(() => expect(release).toBeDefined())
