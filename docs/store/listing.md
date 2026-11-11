@@ -115,7 +115,7 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
 - Collects: **website content** (pull request diffs, titles and descriptions), **authentication
   information** (the user's own OpenRouter API key, or the OAuth tokens OpenAI issues when the user
   signs in with ChatGPT) and **personally identifiable information** (the email address and account
-  ID in the ChatGPT ID token, shown in the popup). All of it stays in the browser unless the user
+  ID in the ChatGPT ID token; the popup shows the email). All of it stays in the browser unless the user
   set up a provider; then the website content of the open pull request is sent to OpenRouter with
   the key, or to OpenAI with the access token, as the bearer token. Pull request numbers and diff
   counts kept in local caches never leave the browser.
