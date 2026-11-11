@@ -1,11 +1,16 @@
 import { browser } from 'wxt/browser'
+import { createDiffRequests } from '@/src/lib/diff/diff-requests'
 import {
 	FETCH_DIFF_MESSAGE,
 	type FetchDiffRequest,
 	type FetchDiffResponse,
-	fetchPullRequestDiff,
 	PullRequestDiffError,
 } from '@/src/lib/diff/fetch-diff'
+import {
+	FETCH_DIFF_STATS_MESSAGE,
+	type FetchDiffStatsRequest,
+	type FetchDiffStatsResponse,
+} from '@/src/lib/header/fetch-stats'
 import { removeLegacyStatsCaches } from '@/src/lib/list/cache'
 import {
 	FETCH_CONFLICTS_MESSAGE,
@@ -19,6 +24,7 @@ import {
 } from '@/src/lib/list/heads'
 import { createListRequests } from '@/src/lib/list/list-requests'
 import { parsePullsListUrl } from '@/src/lib/list/rows'
+import { diffStats } from '@/src/lib/list/stats'
 import {
 	LABEL_LAYERS_MESSAGE,
 	type LabelLayersRequest,
@@ -30,6 +36,11 @@ import {
 	resolvePriorities,
 } from '@/src/lib/model/label-priorities'
 import { errorResponse } from '@/src/lib/rate-limit'
+
+const diffError = (error: unknown) =>
+	error instanceof PullRequestDiffError
+		? { status: error.status, rateLimit: error.rateLimit, isPaused: error.isPaused }
+		: { status: 0 }
 
 const isRequest = <T extends { type: string }>(message: unknown, type: T['type']): message is T =>
 	typeof message === 'object' && message !== null && 'type' in message && message.type === type
@@ -46,18 +57,22 @@ export default defineBackground(() => {
 
 	// One queue for the list requests of every tab; the pull request page's own diff does not wait behind them.
 	const list = createListRequests()
+	// A pull request's diff the page and its header ask for at the same time is downloaded once.
+	const diffs = createDiffRequests(list.diff)
 
 	browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (isRequest<FetchDiffRequest>(message, FETCH_DIFF_MESSAGE)) {
-			;(message.isList ? list.diff(message) : fetchPullRequestDiff(message))
+			;(message.isList ? diffs.queued(message) : diffs.page(message))
 				.then((text) => sendResponse({ text } satisfies FetchDiffResponse))
-				.catch((error: unknown) =>
-					sendResponse(
-						(error instanceof PullRequestDiffError
-							? { status: error.status, rateLimit: error.rateLimit, isPaused: error.isPaused }
-							: { status: 0 }) satisfies FetchDiffResponse,
-					),
-				)
+				.catch((error: unknown) => sendResponse(diffError(error) satisfies FetchDiffResponse))
+			return true
+		}
+		if (isRequest<FetchDiffStatsRequest>(message, FETCH_DIFF_STATS_MESSAGE)) {
+			// Counted here, so the header's page gets the counts and never the diff.
+			diffs
+				.queued(message)
+				.then((text) => sendResponse({ stats: diffStats(text) } satisfies FetchDiffStatsResponse))
+				.catch((error: unknown) => sendResponse(diffError(error) satisfies FetchDiffStatsResponse))
 			return true
 		}
 		if (isRequest<FetchConflictsRequest>(message, FETCH_CONFLICTS_MESSAGE)) {

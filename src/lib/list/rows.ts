@@ -192,10 +192,12 @@ function renderMarker(
 	settle(meta)
 }
 
-// What the pull request changes in code, in parentheses after the totals and dimmed so the totals lead;
-// its title says what the numbers are and what was left out.
-function codePart(stats: DiffStats): HTMLElement {
-	const code = span('(')
+/**
+ * What the pull request changes in code, in parentheses after the totals and dimmed so the totals lead; its title says
+ * what the numbers are and what was left out. `className` takes the typography of the totals it follows.
+ */
+export function codePart(stats: Pick<DiffStats, 'code' | 'excluded'>, className = ''): HTMLElement {
+	const code = span('(', className)
 	code.title = codeTooltip(stats)
 	code.style.cssText = 'opacity:0.7'
 	const deletions = span(`−${formatCount(stats.code.deletions)}`, 'fgColor-danger')
