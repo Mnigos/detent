@@ -41,6 +41,7 @@ Everything the extension stores stays in your browser's extension storage:
   for the same diff (the last five revisions of each pull request),
 - cached Priority Review rankings, per pull request, model and diff revision (the last five
   revisions of each pull request),
+- whether the Hide tests switch is on,
 - diff sizes for pull request lists: owner, repository, pull request number, additions, deletions,
   file count and the time they were counted, reused for 10 minutes and capped at 500 pull requests,
 - a local counter of the tokens and cost your requests to OpenRouter reported.
