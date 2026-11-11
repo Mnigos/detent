@@ -36,6 +36,7 @@ const state = (overrides: Partial<PanelState> = {}): PanelState => ({
 	collapsedSections: new Set(),
 	isAnalyzing: false,
 	isTrailingExpanded: false,
+	isHidingTests: false,
 	...overrides,
 })
 

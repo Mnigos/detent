@@ -7,10 +7,12 @@ import {
 	type ViewMode,
 	viewedCount,
 } from '../panel/store'
+import { hiddenTestPaths, hiddenTestsHint } from '../panel/test-filter'
 import { buildFolderTree, type TreeNode } from './folders'
 import { createModeToggle, PRIORITY_REVIEW } from './mode-toggle'
 import { checkIcon, type TreeTemplates } from './native'
 import { container, folderRow, group, ROW_TEXT_STYLE, setLevel } from './rows'
+import { createHiddenTestsHint, createNativeRowFilter } from './test-rows'
 
 export const TREE_ID = 'detent-tree'
 const SUMMARY_STYLE =
@@ -31,6 +33,7 @@ export interface TreeHandlers {
 	onToggleTrailing: () => void
 	onToggleSection: (id: string) => void
 	onSetMode: (mode: ViewMode) => void
+	onToggleTests: () => void
 }
 
 export interface TreeView {
@@ -47,14 +50,16 @@ export function createTreeView(
 	const root = document.createElement('div')
 	root.id = TREE_ID
 	// The toggle sits above GitHub's own tree so it stays reachable in Files mode, where our list is hidden.
-	const modes = createModeToggle(handlers.onSetMode)
+	const modes = createModeToggle(handlers.onSetMode, handlers.onToggleTests)
 	const toggle = modes.element
+	const hint = createHiddenTestsHint(handlers.onToggleTests)
+	const nativeRows = createNativeRowFilter(anchorIds.keys())
 	const list = document.createElement('ul')
 	list.setAttribute('role', 'tree')
 	list.setAttribute('aria-label', 'Layers')
 	const footer = document.createElement('div')
 	footer.className = 'fgColor-muted f6 px-2 py-1'
-	root.append(list, footer)
+	root.append(hint.element, list, footer)
 	let attached: HTMLUListElement | undefined
 	let rendered: PanelState | undefined
 	let renderedFilter = ''
@@ -216,6 +221,7 @@ export function createTreeView(
 		left.isRaw === right.isRaw &&
 		left.isPriority === right.isPriority &&
 		left.isTrailingExpanded === right.isTrailingExpanded &&
+		left.isHidingTests === right.isHidingTests &&
 		left.layers.every(
 			(layer, index) => isExpanded(index, layer, left) === isExpanded(index, layer, right),
 		)
@@ -299,6 +305,9 @@ export function createTreeView(
 			}
 			native.style.display = state.isRaw ? '' : 'none'
 			list.hidden = state.isRaw
+			const hidden = hiddenTestPaths(state)
+			nativeRows.apply(native, hidden)
+			hint.update(hidden.size > 0 ? hiddenTestsHint(hidden.size) : undefined)
 			const query = document.querySelector<HTMLInputElement>(FILTER_INPUT)?.value.trim() ?? ''
 			const matches = query
 				? [...native.querySelectorAll('a[href^="#diff-"]')].map((anchor) =>
@@ -332,6 +341,7 @@ export function createTreeView(
 			footer.textContent = visible && sections.length === 0 ? NO_MATCH : statusOf(state)
 		},
 		detach() {
+			nativeRows.clear()
 			attached?.style.removeProperty('display')
 			attached = undefined
 			toggle.remove()

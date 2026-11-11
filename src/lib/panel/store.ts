@@ -1,4 +1,5 @@
 import type { FileRole } from '../layers/roles'
+import { isTestFile, withoutTests } from './test-filter'
 
 export interface PanelFile {
 	path: string
@@ -44,6 +45,8 @@ export interface PanelState extends PanelPosition {
 	/** A model request is in flight; the layers on screen are provisional. */
 	isAnalyzing: boolean
 	isTrailingExpanded: boolean
+	/** Test files are filtered out of `layers`; the group and priority layers keep them. */
+	isHidingTests: boolean
 	toast?: string
 }
 
@@ -64,6 +67,7 @@ export type PanelAction =
 	/** `silent` marks a sync from page loading: the set updates, the position and page stay put. */
 	| { type: 'viewed'; paths: ReadonlySet<string>; silent?: boolean }
 	| { type: 'dismiss-toast' }
+	| { type: 'hide-tests'; isHiding: boolean }
 
 export const TOAST_MILLISECONDS = 2000
 
@@ -166,14 +170,36 @@ function applyViewed(state: PanelState, paths: ReadonlySet<string>, silent = fal
 	return next
 }
 
-// New sections keep the reviewer on the same file wherever it landed.
-function showSections(state: PanelState, layers: PanelLayer[]): PanelState {
+// New sections keep the reviewer on the same file wherever it landed. `source` is unfiltered.
+function showSections(state: PanelState, source: PanelLayer[]): PanelState {
+	const layers = state.isHidingTests ? withoutTests(source) : source
 	const path = currentFile(state)?.path
 	const moved = readingOrder(layers).find(
 		(entry) => layers[entry.layerIndex]?.files[entry.fileIndex]?.path === path,
 	)
 
 	return clampPosition({ ...state, ...moved, layers })
+}
+
+// A test file being hidden hands the cursor to the next file still shown, or the last one before it.
+function hideTests(state: PanelState, isHiding: boolean): PanelState {
+	if (isHiding === state.isHidingTests) return state
+
+	const source = state.isPriority ? state.priorityLayers : state.groupLayers
+	const next = { ...state, isHidingTests: isHiding }
+	const file = currentFile(state)
+	if (!isHiding || !file || !isTestFile(file)) return showSections(next, source)
+
+	const order = readingOrder(state.layers)
+	const from = positionOf(order, state)
+	const shown = (entry: { layerIndex: number; fileIndex: number }) => {
+		const candidate = state.layers[entry.layerIndex]?.files[entry.fileIndex]
+
+		return candidate !== undefined && !isTestFile(candidate)
+	}
+	const target = order.slice(from + 1).find(shown) ?? order.slice(0, from).reverse().find(shown)
+
+	return showSections({ ...next, ...target }, source)
 }
 
 function setMode(state: PanelState, mode: ViewMode): PanelState {
@@ -259,6 +285,8 @@ function reduce(state: PanelState, action: PanelAction): PanelState {
 			return applyViewed(state, action.paths, action.silent)
 		case 'dismiss-toast':
 			return state.toast === undefined ? state : { ...state, toast: undefined }
+		case 'hide-tests':
+			return hideTests(state, action.isHiding)
 	}
 }
 
@@ -277,6 +305,7 @@ export interface PanelStoreOptions {
 	priorityLayers?: PanelLayer[]
 	priorityStatus?: string
 	collapsedSections?: Iterable<string>
+	isHidingTests?: boolean
 }
 
 export function createPanelStore(layers: PanelLayer[], options: PanelStoreOptions): PanelStore {
@@ -297,10 +326,12 @@ export function createPanelStore(layers: PanelLayer[], options: PanelStoreOption
 		collapsedSections: new Set(options.collapsedSections),
 		isAnalyzing: false,
 		isTrailingExpanded: false,
+		isHidingTests: false,
 	})
 	const currentId = initial.layers[initial.layerIndex]?.id
 	let state =
 		currentId && initial.collapsedSections.has(currentId) ? unfold(initial, currentId) : initial
+	if (options.isHidingTests) state = reducePanel(state, { type: 'hide-tests', isHiding: true })
 	const listeners = new Set<() => void>()
 	let toastTimer: ReturnType<typeof setTimeout> | undefined
 

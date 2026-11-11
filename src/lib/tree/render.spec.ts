@@ -54,6 +54,7 @@ beforeEach(async () => {
 		onToggleTrailing: vi.fn(),
 		onToggleSection: vi.fn(),
 		onSetMode: vi.fn(),
+		onToggleTests: vi.fn(),
 	}
 })
 
@@ -149,7 +150,9 @@ describe('createTreeView', () => {
 	it('uses small Primer buttons and switches their variants with the selected mode', () => {
 		const view = createTreeView(templates, anchorIds, handlers)
 		view.apply(nativeTree(), pageState())
-		const buttons = [...document.querySelectorAll<HTMLButtonElement>(`#${TOGGLE_ID} button`)]
+		const buttons = [
+			...document.querySelectorAll<HTMLButtonElement>(`#${TOGGLE_ID} button[data-mode]`),
+		]
 		expect(buttons.map((button) => button.textContent)).toEqual(['Layers', 'Priority', 'Files'])
 		expect(buttons.map((button) => button.dataset.size)).toEqual(['small', 'small', 'small'])
 		expect(buttons.map((button) => button.dataset.variant)).toEqual([

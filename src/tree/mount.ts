@@ -1,6 +1,7 @@
 import type { ContentScriptContext } from 'wxt/utils/content-script-context'
 import { LOADING_TEXT, showAnalysisBadge, showKeyBadge } from '@/src/lib/panel/analysis-badge'
 import { observeMutations, stickyHeaderHeight } from '@/src/lib/panel/github-dom'
+import { toggleHideTests } from '@/src/lib/panel/hide-tests'
 import { panelKeyAction } from '@/src/lib/panel/keys'
 import { createReviewSession } from '@/src/lib/panel/session'
 import { STATUS_LINES } from '@/src/lib/panel/status'
@@ -35,6 +36,7 @@ export async function startTree(ctx: ContentScriptContext, location: PullRequest
 		onToggleTrailing: () => store.dispatch({ type: 'toggle-trailing' }),
 		onToggleSection: (id: string) => store.dispatch({ type: 'toggle-section', id }),
 		onSetMode: (mode: ViewMode) => store.dispatch({ type: 'set-mode', mode }),
+		onToggleTests: () => toggleHideTests(store),
 	}
 
 	// The ranking is a separate model request, made only once Priority Review is on screen. It

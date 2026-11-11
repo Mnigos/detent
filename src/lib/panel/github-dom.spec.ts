@@ -4,15 +4,18 @@ import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
 	anchorIdForPath,
+	clearDimming,
 	DIMMED_CLASS,
 	fetchPullRequestBody,
 	fileSections,
 	findFileSection,
+	HIDDEN_CLASS,
 	observeMutations,
 	readPullRequestSummary,
 	readViewedPaths,
 	resolveColorMode,
 	setDimmedPaths,
+	setHiddenPaths,
 	toggleViewed,
 } from './github-dom'
 
@@ -113,6 +116,28 @@ describe('setDimmedPaths', () => {
 		setDimmedPaths(new Set())
 
 		expect(spec?.section.classList.contains(DIMMED_CLASS)).toBe(false)
+	})
+})
+
+describe('setHiddenPaths', () => {
+	it('takes the listed diffs off the page until shown again or cleared', () => {
+		setDimmedPaths(new Set())
+		setHiddenPaths(new Set([SPEC]))
+		const [spec, service] = fileSections()
+
+		expect(spec?.section.classList.contains(HIDDEN_CLASS)).toBe(true)
+		expect(service?.section.classList.contains(HIDDEN_CLASS)).toBe(false)
+		expect(document.getElementById('detent-dimming')?.textContent).toContain(
+			`.${HIDDEN_CLASS}{display:none!important}`,
+		)
+
+		setHiddenPaths(new Set())
+		expect(spec?.section.classList.contains(HIDDEN_CLASS)).toBe(false)
+
+		setHiddenPaths(new Set([SPEC]))
+		clearDimming()
+		expect(spec?.section.classList.contains(HIDDEN_CLASS)).toBe(false)
+		expect(document.getElementById('detent-dimming')).toBeNull()
 	})
 })
 

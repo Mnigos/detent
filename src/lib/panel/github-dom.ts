@@ -1,6 +1,7 @@
 import { digestText } from '../diff/digest'
 
 export const DIMMED_CLASS = 'detent-dimmed'
+export const HIDDEN_CLASS = 'detent-hidden'
 const DIMMING_STYLE_ID = 'detent-dimming'
 const FILE_SECTION =
 	'.js-file, copilot-diff-entry, [data-details-container-group="file"], [data-tagsearch-path], [data-file-path]'
@@ -142,14 +143,22 @@ export function setDimmedPaths(
 	if (!document.getElementById(DIMMING_STYLE_ID)) {
 		const style = document.createElement('style')
 		style.id = DIMMING_STYLE_ID
-		style.textContent = `${FILE_SECTION}{transition:opacity 150ms}.${DIMMED_CLASS}{opacity:.45}`
+		style.textContent = `${FILE_SECTION}{transition:opacity 150ms}.${DIMMED_CLASS}{opacity:.45}.${HIDDEN_CLASS}{display:none!important}`
 		document.head.append(style)
 	}
 	for (const { path, section } of sections) section.classList.toggle(DIMMED_CLASS, dimmed.has(path))
 }
 
+/** Takes the given files' diffs off the page; the style rule comes with the dimming one. */
+export function setHiddenPaths(
+	hidden: ReadonlySet<string>,
+	sections: { path: string; section: HTMLElement }[] = fileSections(),
+): void {
+	for (const { path, section } of sections) section.classList.toggle(HIDDEN_CLASS, hidden.has(path))
+}
+
 export function clearDimming(sections: { section: HTMLElement }[] = fileSections()): void {
-	for (const { section } of sections) section.classList.remove(DIMMED_CLASS)
+	for (const { section } of sections) section.classList.remove(DIMMED_CLASS, HIDDEN_CLASS)
 	document.getElementById(DIMMING_STYLE_ID)?.remove()
 }
 

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { classifyRole } from '../lib/layers/roles'
 import { anchorIdForPath } from '../lib/panel/github-dom'
 import type { PanelLayer, PanelState } from '../lib/panel/store'
 import { findNativeTree, readTemplates, type TreeTemplates } from '../lib/tree/native'
@@ -20,7 +21,7 @@ const layer = (id: string, name: string, summary: string, ...paths: string[]): P
 	name,
 	summary,
 	isTrailing: id === 'generated',
-	files: paths.map((path) => ({ path, role: 'other', additions: 1, deletions: 0 })),
+	files: paths.map((path) => ({ path, role: classifyRole(path), additions: 1, deletions: 0 })),
 })
 
 export const LAYERS = [
@@ -52,6 +53,7 @@ export const pageState = (overrides: Partial<PanelState> = {}): PanelState => ({
 	collapsedSections: new Set(),
 	isAnalyzing: false,
 	isTrailingExpanded: false,
+	isHidingTests: false,
 	...overrides,
 })
 

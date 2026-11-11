@@ -1,5 +1,6 @@
 import { observeMutations } from '../panel/github-dom'
 import { isLayerComplete, type PanelState, viewedCount } from '../panel/store'
+import { hiddenTestPaths } from '../panel/test-filter'
 
 const LAYER_ORDER_STEP = 1000
 // Prefix of the sticky badge on a file the model marked as worth a careful read.
@@ -48,6 +49,7 @@ export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 		for (const entry of entries) {
 			entry.style.order = ''
 			entry.style.opacity = ''
+			entry.style.display = ''
 		}
 		entries.clear()
 		for (const header of headers.values()) header.remove()
@@ -153,6 +155,8 @@ export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 			if (header.hidden !== state.isRaw) header.hidden = state.isRaw
 			if (header.parentElement !== list) list.append(header)
 		}
+		// Hidden test files leave the page in every mode, Files included.
+		const hidden = new Set([...hiddenTestPaths(state)].flatMap((path) => anchorIds.get(path) ?? []))
 		for (const [id, header] of headers)
 			if (!state.layers.some((layer) => layer.id === id)) {
 				header.remove()
@@ -179,6 +183,8 @@ export function createDiffView(anchorIds: ReadonlyMap<string, string>) {
 				state.isRaw || !isEntry || (position && active(position.layerIndex)) ? '' : '0.45'
 			if (entry.style.order !== order) entry.style.order = order
 			if (entry.style.opacity !== opacity) entry.style.opacity = opacity
+			const display = regionId && hidden.has(regionId) ? 'none' : ''
+			if (entry.style.display !== display) entry.style.display = display
 			entries.add(entry)
 			if (position) placeBadge(entry, position.badge, state.isRaw)
 		}

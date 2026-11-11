@@ -15,6 +15,7 @@ import { COLLAPSED_PRIORITY_SECTIONS } from '../priority/sections'
 import { PRIORITY_LINES } from '../priority/status'
 import { type PullRequestLocation, pullRequestScope } from '../pull-request-url'
 import { anchorIdForPath, fetchPullRequestBody, readPullRequestSummary } from './github-dom'
+import { followHideTests, readHideTests } from './hide-tests'
 import { STATUS_LINES, statusLineFor } from './status'
 import {
 	createPanelStore,
@@ -152,6 +153,7 @@ export async function createReviewSession(
 					collapsedSections: COLLAPSED_PRIORITY_SECTIONS,
 				}
 			: {}),
+		isHidingTests: await readHideTests(),
 		savePosition: (position) => {
 			void browser.storage.session
 				.set({ [key]: { ...position, path: currentFile(store.getSnapshot())?.path } })
@@ -160,6 +162,7 @@ export async function createReviewSession(
 	})
 
 	let stopped = false
+	const stopHideTests = followHideTests(store)
 
 	async function requestLabels() {
 		// Saved groups keep their own line; only a first analysis has nothing else to say.
@@ -195,6 +198,7 @@ export async function createReviewSession(
 		anchorIds,
 		stop() {
 			stopped = true
+			stopHideTests()
 		},
 		...(priorities
 			? {

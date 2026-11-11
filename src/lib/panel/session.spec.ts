@@ -16,7 +16,11 @@ const SESSION_GET = vi.hoisted(() => vi.fn<() => Promise<Record<string, unknown>
 vi.mock('wxt/browser', () => ({
 	browser: {
 		runtime: { id: 'extension-test' },
-		storage: { session: { get: SESSION_GET, set: vi.fn() } },
+		storage: {
+			session: { get: SESSION_GET, set: vi.fn() },
+			local: { get: vi.fn(), set: vi.fn() },
+			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+		},
 	},
 }))
 vi.mock('../diff/fetch-diff', () => ({ requestPullRequestDiff: vi.fn() }))
