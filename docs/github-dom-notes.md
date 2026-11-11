@@ -93,6 +93,37 @@ Read before anything heavy runs, to decide whether detent waits for a click (`sr
   shows no complete size within 5 s, the pull request counts as large.
 
 
+## Pull request header diffstat
+
+Where the header's code lines (`[data-detent-header-code]`, `src/lib/header/header-dom.ts`) go. Observed 2026-11-11
+signed out with headless Chromium on `https://github.com/TanStack/router/pull/8658` and its tabs; trimmed copies are
+hand-written in `src/test/pull-request-header.ts`.
+
+- Conversation, Commits and Checks serve the React header. Inside
+  `header[data-component="SplitPageLayout.Header"] [data-component="PageHeader"] [data-component="PH_Navigation"]`,
+  a `div.d-flex.flex-items-center.gap-1` holds `span.f6.fgColor-success.text-bold` (`+5,792`),
+  `span.f6.fgColor-danger.text-bold` (`-5,344`, a hyphen), `span.sr-only` "Lines changed: 5792 additions & 5344
+  deletions" and a `div.d-flex` of five `[data-testid="addition|deletion|neutral diffstat"]` squares. The same
+  `PH_Navigation` holds the tab bar, `a[href="/<owner>/<repo>/pull/<n>"]`, `…/commits`, `…/checks`, `…/files`. Class
+  names other than Primer's utilities are hashed per build, so the anchor is the `.sr-only` summary, and the marker
+  goes right after its sibling `.fgColor-danger`.
+- Files changed (signed out, `/changes` redirects there) is the classic page: `.tabnav` holds the tab links and
+  `.tabnav-extra > span#diffstat` with `.color-fg-success` (`+5,792`), `.color-fg-danger` (`−5,344`) and a span of
+  `.diffstat-block-*` squares, spaced by whitespace text. The marker goes after `.color-fg-danger` with a 4px margin
+  and uses `fgColor-*` classes only, so `#diffstat .color-fg-success`, which the large pull request gate reads, still
+  finds GitHub's count first.
+- The logged-in Changes page is not verified. Its file headers carry their own "Lines changed" summary inside
+  `[data-diff-header-wrapper]`; those are skipped, as for the gate.
+- A diffstat counts only when the closest `[data-component="PageHeader"]`, `.tabnav` or `header` contains a tab link
+  of the pull request in the URL, so a header left from the previous pull request after a soft navigation gets no
+  marker. No diffstat found means no marker.
+- Head commit: the React pages embed the pull request (`number`, `headSha`, `baseSha`, `state`, …) in
+  `script[data-target="react-app.embeddedData"]` (path `payload…pullRequest`). That data describes the document's
+  first URL, so it is used only when `performance.getEntriesByType('navigation')[0].name` is a tab of the same pull
+  request and the document is under ten minutes old. The classic Files changed page names the head as
+  `end_commit_oid=` in `[data-url]` partial URLs (`…/pull/<n>/show_partial_comparison?…`), read only on
+  `/pull/<n>/files` itself, as a commit range page names the range's end there.
+
 ## Merge conflicts on pull request lists
 
 Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack/router`, where the REST API reported
