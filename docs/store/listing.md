@@ -34,9 +34,9 @@ starts folded.
 Diff size and conflicts on pull request lists. On a repository's pull request list every row shows
 +additions −deletions · N files, with the lines of code alone in parentheses after the totals when
 tests, docs, lockfiles, generated files, blank and comment lines or whitespace-only changes make up
-part of the diff, and a
-red Conflicts marker on an open pull request whose branch conflicts with its base, or an orange
-Can't rebase one when it merges but would not rebase cleanly (signed in to GitHub).
+part of the diff, and a red Conflicts marker on an open pull request whose branch conflicts with its
+base, or an orange Can't rebase one when it merges but would not rebase cleanly (signed in to
+GitHub).
 
 On the pull request page:
 

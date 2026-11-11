@@ -17,15 +17,15 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   lockfiles, generated files, blank and comment lines or whitespace-only changes account for part
   of it, the lines of code follow the totals in parentheses,
   `+additions −deletions (+a −d) · N files`; their tooltip lists what was left out. The counts are
-  kept for the head commit the list shows and reused for up to a week until a new commit is pushed (10 minutes when the list does not
-  say which commit it shows). When you are signed in, an open pull request (not a draft) whose
-  branch conflicts with its base gets a red `Conflicts` marker, or an orange `Can't rebase` one when
-  it merges but would not rebase cleanly, read from GitHub's merge box and cached for 10 minutes or
-  until a new commit is pushed. Only rows on screen or one screen below are asked about; the rest
-  are asked when you scroll to them. Every tab shares one queue of three requests at a time, and a
-  pull request two tabs ask about is fetched once. When GitHub rate-limits these requests, the list
-  waits as long as GitHub asks (a minute if it does not say, longer on repeats) and then fills in
-  the rows still missing.
+  kept for the head commit the list shows and reused for up to a week until a new commit is pushed
+  (10 minutes when the list does not say which commit it shows). When you are signed in, an open
+  pull request (not a draft) whose branch conflicts with its base gets a red `Conflicts` marker, or
+  an orange `Can't rebase` one when it merges but would not rebase cleanly, read from GitHub's merge
+  box and cached for 10 minutes or until a new commit is pushed. Only rows on screen or one screen
+  below are asked about; the rest are asked when you scroll to them. Every tab shares one queue of
+  three requests at a time, and a pull request two tabs ask about is fetched once. When GitHub
+  rate-limits these requests, the list waits as long as GitHub asks (a minute if it does not say,
+  longer on repeats) and then fills in the rows still missing.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
