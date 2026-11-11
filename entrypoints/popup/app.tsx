@@ -1,42 +1,47 @@
 import { useState } from 'react'
-import { type OpenRouterError, testOpenRouter } from '@/src/lib/model/openrouter'
-import { EMPTY_USAGE, formatCost, resetUsage, type Usage } from '@/src/lib/model/usage'
-import { DEFAULT_MODEL, type Settings, writeSettings } from '@/src/lib/settings'
+import { type ChatGptStatus, USAGE_SETTINGS_URL } from '@/src/lib/chatgpt/messages'
+import { PROVIDER_NAMES } from '@/src/lib/model/provider'
+import {
+	EMPTY_USAGE,
+	formatCost,
+	resetChatGptRequests,
+	resetUsage,
+	type Usage,
+} from '@/src/lib/model/usage'
+import { type ProviderChoice, type Settings, writeSettings } from '@/src/lib/settings'
+import { ChatGptAccount } from './chatgpt'
+import { OpenRouterSettings } from './openrouter'
 
-const ERROR_LINES: Record<OpenRouterError['kind'], string> = {
-	unauthorized: 'OpenRouter rejected the API key.',
-	credits: 'OpenRouter reports no credits left.',
-	timeout: 'OpenRouter took too long to answer.',
-	request: 'OpenRouter request failed.',
-	invalid: 'OpenRouter answered with an unexpected response.',
-}
-
-const FIELD =
-	'rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500'
+const PROVIDERS: ProviderChoice[] = ['openrouter', 'chatgpt']
+const LINK = 'underline hover:text-neutral-300'
 
 interface AppProps {
 	settings: Settings
 	usage: Usage
+	chatgpt: ChatGptStatus
+	chatgptRequests: number
 	isLoading?: boolean
 }
 
-export function App({ settings, usage: initialUsage, isLoading = false }: AppProps) {
+const plural = (count: number) => `${count} ${count === 1 ? 'request' : 'requests'}`
+
+export function App({
+	settings,
+	usage: initialUsage,
+	chatgpt,
+	chatgptRequests: initialRequests,
+	isLoading = false,
+}: AppProps) {
 	const [usage, setUsage] = useState(initialUsage)
-	const [key, setKey] = useState(settings.openRouterKey)
+	const [chatgptRequests, setChatgptRequests] = useState(initialRequests)
+	const [provider, setProvider] = useState(settings.provider)
 	const [isEnabled, setIsEnabled] = useState(settings.isEnabled)
 	const [showListStats, setShowListStats] = useState(settings.showListStats)
-	const [model, setModel] = useState(settings.model)
-	const [notice, setNotice] = useState('')
-	const [isTesting, setIsTesting] = useState(false)
+	const isChatGpt = provider === 'chatgpt'
 
-	async function save() {
-		const saved = await writeSettings({
-			openRouterKey: key.trim(),
-			model: model.trim() || DEFAULT_MODEL,
-		})
-		setKey(saved.openRouterKey)
-		setModel(saved.model)
-		setNotice('Saved.')
+	async function choose(next: ProviderChoice) {
+		setProvider(next)
+		await writeSettings({ provider: next })
 	}
 
 	async function toggleEnabled(next: boolean) {
@@ -50,23 +55,13 @@ export function App({ settings, usage: initialUsage, isLoading = false }: AppPro
 	}
 
 	async function reset() {
+		if (isChatGpt) {
+			await resetChatGptRequests()
+			setChatgptRequests(0)
+			return
+		}
 		await resetUsage()
 		setUsage(EMPTY_USAGE)
-	}
-
-	async function test() {
-		const call = { key: key.trim(), model: model.trim() || DEFAULT_MODEL }
-		if (!call.key) return setNotice('Enter an OpenRouter API key first.')
-
-		setIsTesting(true)
-		setNotice('Testing…')
-		const error = await testOpenRouter(call)
-		setNotice(
-			error
-				? `${ERROR_LINES[error.kind]}${error.status ? ` (HTTP ${error.status})` : ''}`
-				: `Connected: ${call.model}`,
-		)
-		setIsTesting(false)
 	}
 
 	return (
@@ -90,58 +85,43 @@ export function App({ settings, usage: initialUsage, isLoading = false }: AppPro
 				/>
 				Show diff size and conflicts on pull request lists, and code lines in pull request headers
 			</label>
-			<label className="flex flex-col gap-1 text-neutral-400 text-xs">
-				OpenRouter API key
-				<input
-					type="password"
-					autoComplete="off"
-					disabled={isLoading}
-					value={key}
-					onChange={(event) => setKey(event.target.value)}
-					className={FIELD}
-				/>
-			</label>
-			<label className="flex flex-col gap-1 text-neutral-400 text-xs">
-				Model
-				<input
-					type="text"
-					spellCheck={false}
-					disabled={isLoading}
-					value={model}
-					onChange={(event) => setModel(event.target.value)}
-					placeholder={DEFAULT_MODEL}
-					className={FIELD}
-				/>
-			</label>
-			<div className="flex items-center gap-2">
-				<button
-					type="button"
-					onClick={save}
-					disabled={isLoading}
-					className="rounded bg-blue-600 px-3 py-1.5 font-medium text-sm disabled:opacity-50"
-				>
-					Save
-				</button>
-				<button
-					type="button"
-					onClick={test}
-					disabled={isTesting || isLoading}
-					className="rounded border border-neutral-700 px-3 py-1.5 text-sm disabled:opacity-50"
-				>
-					Test
-				</button>
-				<span aria-live="polite" className="text-neutral-400 text-xs">
-					{isLoading ? 'Loading…' : notice}
-				</span>
-			</div>
+			<fieldset className="flex flex-col gap-1">
+				<legend className="mb-1 text-neutral-400 text-xs">Model provider</legend>
+				<div className="flex gap-1 rounded border border-neutral-700 p-0.5">
+					{PROVIDERS.map((id) => (
+						<label
+							key={id}
+							className={`flex-1 cursor-pointer rounded px-2 py-1 text-center text-sm ${provider === id ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-400 hover:text-neutral-200'}`}
+						>
+							<input
+								type="radio"
+								name="provider"
+								value={id}
+								disabled={isLoading}
+								checked={provider === id}
+								onChange={() => void choose(id)}
+								className="sr-only"
+							/>
+							{PROVIDER_NAMES[id]}
+						</label>
+					))}
+				</div>
+			</fieldset>
+			{isChatGpt ? (
+				<ChatGptAccount status={chatgpt} model={settings.chatgptModel} isLoading={isLoading} />
+			) : (
+				<OpenRouterSettings settings={settings} isLoading={isLoading} />
+			)}
 			<p className="text-[11px] text-neutral-500">
-				Diffs and descriptions of the pull requests you open go to OpenRouter under your key.
+				{isChatGpt
+					? 'Diffs and descriptions of the pull requests you open go to OpenAI and count against your ChatGPT plan.'
+					: 'Diffs and descriptions of the pull requests you open go to OpenRouter under your key.'}{' '}
 				Nothing else leaves the browser.{' '}
 				<a
 					href="https://github.com/Mnigos/detent/blob/main/PRIVACY.md"
 					target="_blank"
 					rel="noreferrer"
-					className="underline hover:text-neutral-300"
+					className={LINK}
 				>
 					Privacy
 				</a>
@@ -150,16 +130,26 @@ export function App({ settings, usage: initialUsage, isLoading = false }: AppPro
 					href="https://github.com/Mnigos/detent"
 					target="_blank"
 					rel="noreferrer"
-					className="underline hover:text-neutral-300"
+					className={LINK}
 				>
 					Source
 				</a>
 			</p>
 			<p className="flex justify-end gap-2 text-[11px] text-neutral-500">
-				<span title="Spent by detent on this key since the last reset">
-					Usage: {formatCost(usage.cost)} · {usage.requests}{' '}
-					{usage.requests === 1 ? 'request' : 'requests'}
-				</span>
+				{isChatGpt ? (
+					<>
+						<span title="Requests detent sent on your ChatGPT plan since the last reset">
+							Usage: {plural(chatgptRequests)}
+						</span>
+						<a href={USAGE_SETTINGS_URL} target="_blank" rel="noreferrer" className={LINK}>
+							Manage usage
+						</a>
+					</>
+				) : (
+					<span title="Spent by detent on this key since the last reset">
+						Usage: {formatCost(usage.cost)} · {plural(usage.requests)}
+					</span>
+				)}
 				<button type="button" onClick={reset} className="hover:text-neutral-300">
 					reset
 				</button>

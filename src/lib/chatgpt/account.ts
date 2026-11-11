@@ -16,7 +16,6 @@ export const AGENT_NAME = 'detent for GitHub'
 // Not 1455, where a Codex CLI login server may listen.
 export const CALLBACK_PORT = 47_801
 export const REDIRECT_URI = `http://127.0.0.1:${CALLBACK_PORT}/auth/callback`
-export const USAGE_SETTINGS_URL = 'https://chatgpt.com/settings/usage'
 
 export interface Tokens {
 	idToken: string

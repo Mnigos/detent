@@ -3,6 +3,9 @@
 import { browser } from 'wxt/browser'
 import type { ChatGptModel } from './models'
 
+/** Where a ChatGPT user reviews and limits what apps take from their plan. */
+export const USAGE_SETTINGS_URL = 'https://chatgpt.com/settings/usage'
+
 export const CHATGPT_MESSAGE = {
 	status: 'detent:chatgpt:status',
 	signIn: 'detent:chatgpt:sign-in',
