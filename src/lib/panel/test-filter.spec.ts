@@ -181,6 +181,26 @@ describe('hide-tests in the panel store', () => {
 		expect(paths(store.getSnapshot().layers)).toEqual([['api/a.ts']])
 	})
 
+	it('opens a folded priority section when the cursor moves off a hidden test into it', () => {
+		const sections = [
+			{
+				...layer('folded', file('api/a.spec.ts', 'test'), file('api/a.ts')),
+				isCollapsible: true,
+			},
+		]
+		const store = storeOf({
+			status: '',
+			savePosition: vi.fn(),
+			priorityLayers: sections,
+			position: { isPriority: true },
+		})
+		store.dispatch({ type: 'toggle-section', id: 'folded' })
+		expect(store.getSnapshot().collapsedSections.has('folded')).toBe(true)
+		store.dispatch({ type: 'hide-tests', isHiding: true })
+		expect(currentFile(store.getSnapshot())?.path).toBe('api/a.ts')
+		expect(store.getSnapshot().collapsedSections.has('folded')).toBe(false)
+	})
+
 	it('does not save a position change caused only by filtering out other layers', () => {
 		const savePosition = vi.fn()
 		const store = storeOf({ status: '', savePosition })
