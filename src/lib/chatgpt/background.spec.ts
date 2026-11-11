@@ -138,6 +138,21 @@ describe('chatGptStatus', () => {
 		expect(JSON.stringify(status)).not.toContain('secret')
 	})
 
+	it('is signed out when loading the models ended the session', async () => {
+		vaultStore.set('account', { clientId: 'c', tokens: { accessToken: 'a' } })
+		vi.mocked(listModels).mockImplementation(async () => {
+			vaultStore.set('account', { clientId: 'c' })
+			vaultStore.set('notice', 'Sign in to ChatGPT again.')
+			throw new Error('SignInRequired')
+		})
+
+		await expect(chatGptStatus()).resolves.toEqual({
+			signedIn: false,
+			models: [],
+			notice: 'Sign in to ChatGPT again.',
+		})
+	})
+
 	it('says so when the models cannot be loaded', async () => {
 		vaultStore.set('account', { clientId: 'c', tokens: { accessToken: 'a' } })
 		vi.mocked(listModels).mockRejectedValue(new Error('HTTP 503'))

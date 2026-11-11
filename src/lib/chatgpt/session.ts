@@ -4,6 +4,7 @@ import {
 	clearNotice,
 	forgetAccount,
 	postToken,
+	REQUEST_TIMEOUT_MILLISECONDS,
 	REVOKE_URL,
 	readAccount,
 	saveAccount,
@@ -34,8 +35,12 @@ export class SignInRequired extends Error {
 	}
 }
 
+// The last access token the API refused. Kept in memory only, so marking it never writes the
+// credential record and cannot race a refresh or a sign-out.
+let rejectedToken: string | undefined
+
 const isFresh = (tokens: Tokens, now = Date.now()) =>
-	tokens.expiresAt - REFRESH_MARGIN_MILLISECONDS > now
+	tokens.accessToken !== rejectedToken && tokens.expiresAt - REFRESH_MARGIN_MILLISECONDS > now
 
 /** Drops the tokens and keeps the registration, so the next sign-in reauthorizes it. */
 async function endSession({ tokens: _tokens, ...registration }: Account, notice: string) {
@@ -124,10 +129,8 @@ export async function accessToken(): Promise<string> {
 }
 
 /** The API refused the access token; the next call refreshes it before trying again. */
-export async function invalidateAccessToken(rejected: string) {
-	const account = await readAccount()
-	if (account?.tokens?.accessToken === rejected)
-		await saveAccount({ ...account, tokens: { ...account.tokens, expiresAt: 0 } })
+export function invalidateAccessToken(rejected: string) {
+	rejectedToken = rejected
 }
 
 async function revoke(clientId: string, refreshToken: string): Promise<boolean> {
@@ -142,6 +145,7 @@ async function revoke(clientId: string, refreshToken: string): Promise<boolean> 
 					token_type_hint: 'refresh_token',
 					client_id: clientId,
 				}),
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
 			})
 			if (response.ok) return true
 			if (response.status < 500) return false

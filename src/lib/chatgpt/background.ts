@@ -36,10 +36,18 @@ export function installCallbackRule() {
 }
 
 export async function chatGptStatus(): Promise<ChatGptStatus> {
-	const [account, notice] = await Promise.all([readAccount(), readNotice()])
-	if (!account?.tokens) return { signedIn: false, models: [], notice }
+	const signedOut = async (): Promise<ChatGptStatus> => ({
+		signedIn: false,
+		models: [],
+		notice: await readNotice(),
+	})
+	if (!(await readAccount())?.tokens) return signedOut()
 
 	const models = await listModels().catch(() => undefined)
+	// Loading the models may have refreshed the session, or ended it.
+	const [account, notice] = await Promise.all([readAccount(), readNotice()])
+	if (!account?.tokens) return signedOut()
+
 	return {
 		signedIn: true,
 		email: account.email,

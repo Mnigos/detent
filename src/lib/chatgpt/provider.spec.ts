@@ -29,6 +29,7 @@ beforeEach(() => {
 	resumeAfterLimit()
 	vaultStore.set('account', { clientId: 'oaiapp_issued', tokens: { accessToken: 'access-1' } })
 	vi.mocked(accessToken).mockResolvedValue('access-1')
+	vi.mocked(listModels).mockResolvedValue([])
 	vi.mocked(respond).mockResolvedValue({
 		text: JSON.stringify({ layers: LAYERS }),
 		isCharged: true,
@@ -67,6 +68,19 @@ describe('chatGptProvider', () => {
 		expect(vi.mocked(respond).mock.calls[0]?.[1]).toMatchObject({
 			text: { format: { name: 'priorities' } },
 		})
+	})
+
+	it('replaces a saved model the account no longer lists, as the popup shows it', async () => {
+		vi.mocked(listModels).mockResolvedValue([{ slug: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' }])
+		await expect(chatGptProvider(SETTINGS)).resolves.toMatchObject({
+			model: 'gpt-5.6-terra',
+			labeler: 'chatgpt:gpt-5.6-terra',
+		})
+	})
+
+	it('keeps the saved model when the list cannot be loaded', async () => {
+		vi.mocked(listModels).mockRejectedValue(new Error('offline'))
+		await expect(chatGptProvider(SETTINGS)).resolves.toMatchObject({ model: 'gpt-6-luna' })
 	})
 
 	it('takes the first listed model when none is chosen', async () => {

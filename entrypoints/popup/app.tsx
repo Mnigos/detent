@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { type ChatGptStatus, USAGE_SETTINGS_URL } from '@/src/lib/chatgpt/messages'
 import { PROVIDER_NAMES } from '@/src/lib/model/provider'
 import {
@@ -18,7 +18,7 @@ const LINK = 'underline hover:text-neutral-300'
 interface AppProps {
 	settings: Settings
 	usage: Usage
-	chatgpt: ChatGptStatus
+	chatgpt: Promise<ChatGptStatus>
 	chatgptRequests: number
 	isLoading?: boolean
 }
@@ -107,11 +107,15 @@ export function App({
 					))}
 				</div>
 			</fieldset>
-			{isChatGpt ? (
-				<ChatGptAccount status={chatgpt} model={settings.chatgptModel} isLoading={isLoading} />
-			) : (
+			{/* Both stay mounted, so switching back keeps what was typed or changed there. */}
+			<div hidden={!isChatGpt}>
+				<Suspense fallback={<p className="text-neutral-500 text-xs">Checking ChatGPT…</p>}>
+					<ChatGptAccount status={chatgpt} model={settings.chatgptModel} isLoading={isLoading} />
+				</Suspense>
+			</div>
+			<div hidden={isChatGpt} className="flex flex-col gap-3">
 				<OpenRouterSettings settings={settings} isLoading={isLoading} />
-			)}
+			</div>
 			<p className="text-[11px] text-neutral-500">
 				{isChatGpt
 					? 'Diffs and descriptions of the pull requests you open go to OpenAI and count against your ChatGPT plan.'

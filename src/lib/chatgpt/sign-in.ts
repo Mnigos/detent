@@ -145,8 +145,20 @@ async function fail(message: string): Promise<SignInResult> {
 	return { ok: false, message }
 }
 
-/** Finishes a sign-in from the callback URL: exchange, ID token checks, plan permission, save. */
-export async function completeSignIn(href: string): Promise<SignInResult> {
+let completing: Promise<unknown> = Promise.resolve()
+
+/**
+ * Finishes a sign-in from the callback URL: exchange, ID token checks, plan permission, save.
+ * Callbacks run one at a time, so two copies of one callback cannot both redeem its code.
+ */
+export function completeSignIn(href: string): Promise<SignInResult> {
+	const run = completing.then(() => finish(href))
+	completing = run.catch(() => undefined)
+
+	return run
+}
+
+async function finish(href: string): Promise<SignInResult> {
 	const pending = await vault.get<Pending>(PENDING_KEY)
 	const callback = parseCallback(new URL(href), pending)
 	if (callback.kind === 'error') {

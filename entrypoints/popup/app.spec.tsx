@@ -48,21 +48,33 @@ afterEach(() => {
 	container.remove()
 })
 
-function render(settings: Settings, chatgpt: ChatGptStatus = SIGNED_OUT, chatgptRequests = 0) {
-	act(() =>
+async function render(
+	settings: Settings,
+	chatgpt: ChatGptStatus = SIGNED_OUT,
+	chatgptRequests = 0,
+) {
+	await act(async () =>
 		root.render(
 			<App
 				settings={settings}
 				usage={{ ...EMPTY_USAGE, requests: 2, cost: 0.0123 }}
-				chatgpt={chatgpt}
+				chatgpt={Promise.resolve(chatgpt)}
 				chatgptRequests={chatgptRequests}
 			/>,
 		),
 	)
 }
 const button = (name: string) =>
-	[...container.querySelectorAll('button')].find((element) => element.textContent === name)
-const text = () => container.textContent ?? ''
+	[...container.querySelectorAll('button')].find(
+		(element) => element.textContent === name && visible(element),
+	)
+// Hidden provider sections stay mounted; only what is shown counts.
+const visible = (element: Element) => !element.closest('[hidden]')
+const text = () =>
+	[...container.querySelectorAll('p, span, label, legend, button, a, option')]
+		.filter(visible)
+		.map((element) => element.textContent)
+		.join(' ')
 const click = async (element: Element | undefined) => {
 	await act(async () => {
 		;(element as HTMLElement).click()
@@ -70,8 +82,8 @@ const click = async (element: Element | undefined) => {
 }
 
 describe('provider choice', () => {
-	it('shows the OpenRouter key and cost counter by default', () => {
-		render(DEFAULT_SETTINGS)
+	it('shows the OpenRouter key and cost counter by default', async () => {
+		await render(DEFAULT_SETTINGS)
 
 		expect(text()).toContain('OpenRouter API key')
 		expect(text()).toContain('Usage: $0.01 · 2 requests')
@@ -79,7 +91,7 @@ describe('provider choice', () => {
 	})
 
 	it('switches to ChatGPT, saves the choice and shows the request count without a cost', async () => {
-		render(DEFAULT_SETTINGS, SIGNED_OUT, 1)
+		await render(DEFAULT_SETTINGS, SIGNED_OUT, 1)
 		await click(container.querySelector('input[value="chatgpt"]') ?? undefined)
 
 		expect(writeSettings).toHaveBeenCalledWith({ provider: 'chatgpt' })
@@ -94,7 +106,7 @@ describe('provider choice', () => {
 	})
 
 	it('resets only the counter of the chosen provider', async () => {
-		render(CHATGPT, SIGNED_OUT, 4)
+		await render(CHATGPT, SIGNED_OUT, 4)
 		await click(button('reset'))
 
 		expect(resetChatGptRequests).toHaveBeenCalledOnce()
@@ -106,7 +118,7 @@ describe('provider choice', () => {
 describe('ChatGPT account', () => {
 	it('signed out: offers Continue with ChatGPT and nothing else', async () => {
 		vi.mocked(chatGpt.signIn).mockResolvedValue({ ok: true })
-		render(CHATGPT)
+		await render(CHATGPT)
 
 		expect(container.querySelector('select')).toBeNull()
 		expect(button('Sign out')).toBeUndefined()
@@ -115,8 +127,46 @@ describe('ChatGPT account', () => {
 		expect(container.querySelector('[role="alert"]')).toBeNull()
 	})
 
-	it('signed in: shows the email, the listed models by name in order, and sign out', () => {
-		render(CHATGPT, SIGNED_IN)
+	it('keeps typed and saved values when switching providers back and forth', async () => {
+		vi.mocked(chatGpt.signOut).mockResolvedValue(SIGNED_OUT)
+		await render(CHATGPT, SIGNED_IN)
+		await click(button('Sign out'))
+		await click(container.querySelector('input[value="openrouter"]') ?? undefined)
+		const key = container.querySelector('input[type="password"]') as HTMLInputElement
+		await act(async () => {
+			const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+			setValue?.call(key, 'sk-or-new')
+			key.dispatchEvent(new Event('input', { bubbles: true }))
+		})
+		await click(container.querySelector('input[value="chatgpt"]') ?? undefined)
+		expect(button('Continue with ChatGPT')).toBeDefined()
+		await click(container.querySelector('input[value="openrouter"]') ?? undefined)
+
+		expect((container.querySelector('input[type="password"]') as HTMLInputElement).value).toBe(
+			'sk-or-new',
+		)
+	})
+
+	it('shows the OpenRouter settings at once while ChatGPT has not answered', async () => {
+		await act(async () =>
+			root.render(
+				<App
+					settings={DEFAULT_SETTINGS}
+					usage={EMPTY_USAGE}
+					chatgpt={new Promise(() => {})}
+					chatgptRequests={0}
+				/>,
+			),
+		)
+
+		expect(text()).toContain('OpenRouter API key')
+		expect((container.querySelector('input[type="password"]') as HTMLInputElement).disabled).toBe(
+			false,
+		)
+	})
+
+	it('signed in: shows the email, the listed models by name in order, and sign out', async () => {
+		await render(CHATGPT, SIGNED_IN)
 
 		expect(text()).toContain('Signed in as reviewer@example.com')
 		const options = [...container.querySelectorAll('option')]
@@ -131,7 +181,7 @@ describe('ChatGPT account', () => {
 	})
 
 	it('keeps the chosen model and saves a new choice', async () => {
-		render({ ...CHATGPT, chatgptModel: 'gpt-5.6-terra' }, SIGNED_IN)
+		await render({ ...CHATGPT, chatgptModel: 'gpt-5.6-terra' }, SIGNED_IN)
 		const select = container.querySelector('select') as HTMLSelectElement
 		expect(select.value).toBe('gpt-5.6-terra')
 
@@ -144,7 +194,7 @@ describe('ChatGPT account', () => {
 
 	it('signs out into the signed-out state', async () => {
 		vi.mocked(chatGpt.signOut).mockResolvedValue(SIGNED_OUT)
-		render(CHATGPT, SIGNED_IN)
+		await render(CHATGPT, SIGNED_IN)
 		await click(button('Sign out'))
 
 		expect(chatGpt.signOut).toHaveBeenCalledOnce()
@@ -152,8 +202,8 @@ describe('ChatGPT account', () => {
 		expect(text()).not.toContain('reviewer@example.com')
 	})
 
-	it('shows an error as one short line', () => {
-		render(CHATGPT, {
+	it('shows an error as one short line', async () => {
+		await render(CHATGPT, {
 			...SIGNED_IN,
 			notice: 'ChatGPT plan usage limit reached. Check it in ChatGPT settings.',
 		})
@@ -170,7 +220,7 @@ describe('ChatGPT account', () => {
 			ok: false,
 			message: 'ChatGPT sign-in failed. Try again.',
 		})
-		render(CHATGPT, { ...SIGNED_OUT, notice: undefined })
+		await render(CHATGPT, { ...SIGNED_OUT, notice: undefined })
 		await click(button('Continue with ChatGPT'))
 
 		expect(container.querySelector('[role="alert"]')?.textContent).toBe(
@@ -178,8 +228,8 @@ describe('ChatGPT account', () => {
 		)
 	})
 
-	it('signed out with a notice: asks to sign in again', () => {
-		render(CHATGPT, { ...SIGNED_OUT, notice: 'Sign in to ChatGPT again.' })
+	it('signed out with a notice: asks to sign in again', async () => {
+		await render(CHATGPT, { ...SIGNED_OUT, notice: 'Sign in to ChatGPT again.' })
 
 		expect(container.querySelector('[role="alert"]')?.textContent).toBe('Sign in to ChatGPT again.')
 		expect(button('Continue with ChatGPT')).toBeDefined()

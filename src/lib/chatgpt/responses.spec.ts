@@ -63,6 +63,13 @@ describe('readResponseStream', () => {
 		})
 	})
 
+	it('reads the same answer whatever the chunk boundaries, CRLFs split included', async () => {
+		for (let size = 1; size <= 24; size++)
+			await expect(
+				readResponseStream(sseBody(completedEvents('{"layers":[]}'), size)),
+			).resolves.toEqual({ kind: 'completed', text: '{"layers":[]}' })
+	})
+
 	it('prefers the output text the completed event carries', async () => {
 		const events = [
 			{ type: 'response.output_text.delta', delta: 'partial' },

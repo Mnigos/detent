@@ -63,6 +63,7 @@ export async function readResponseStream(body: ReadableStream<Uint8Array>): Prom
 	const handle = (block: string) => {
 		const data = block
 			.split('\n')
+			.map((line) => line.replace(/\r$/, ''))
 			.filter((line) => line.startsWith('data:'))
 			.map((line) => line.slice(5).trimStart())
 			.join('\n')
@@ -89,13 +90,15 @@ export async function readResponseStream(body: ReadableStream<Uint8Array>): Prom
 		while (!outcome) {
 			const { done, value } = await reader.read()
 			if (done) break
-			buffer += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n')
+			// Normalized after joining: a CRLF can be split between two chunks.
+			buffer = (buffer + decoder.decode(value, { stream: true })).replaceAll('\r\n', '\n')
 			for (let end = buffer.indexOf('\n\n'); end !== -1 && !outcome; end = buffer.indexOf('\n\n')) {
 				handle(buffer.slice(0, end))
 				buffer = buffer.slice(end + 2)
 			}
 		}
-		if (!outcome && buffer.trim()) handle(buffer)
+		buffer += decoder.decode()
+		if (!outcome && buffer.trim()) handle(buffer.replaceAll('\r\n', '\n'))
 	} catch {
 		return { kind: 'interrupted' }
 	} finally {

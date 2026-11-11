@@ -10,6 +10,8 @@ export const JWKS_URL = `${ISSUER}/.well-known/jwks.json`
 export const API_URL = 'https://api.openai.com/v1'
 export const PLAN_SCOPE = 'chatgpt.tokens.use.direct'
 export const SCOPES = `openid profile email offline_access resource.invoke ${PLAN_SCOPE}`
+/** No call to OpenAI's auth or model-list endpoints may hang a popup or a sign-in. */
+export const REQUEST_TIMEOUT_MILLISECONDS = 15_000
 export const DYNAMIC_CLIENT_ID = 'dynamic_agent_client'
 export const AGENT_NAME = 'detent for GitHub'
 // Nothing listens here: a declarativeNetRequest rule turns the navigation into an extension page.
@@ -72,6 +74,7 @@ export async function postToken(form: Record<string, string>): Promise<TokenResp
 		method: 'POST',
 		headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
 		body: new URLSearchParams(form),
+		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
 	})
 	const body = (await response.json().catch(() => ({}))) as TokenResponse & { error?: unknown }
 	if (!response.ok)

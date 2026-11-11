@@ -1,4 +1,4 @@
-import { API_URL } from './account'
+import { API_URL, REQUEST_TIMEOUT_MILLISECONDS } from './account'
 import { accessToken, invalidateAccessToken } from './session'
 
 export const MODELS_URL = `${API_URL}/models`
@@ -47,8 +47,11 @@ export function listModels(): Promise<ChatGptModel[]> {
 
 	const models = (async () => {
 		const token = await accessToken()
-		const response = await fetch(MODELS_URL, { headers: { Authorization: `Bearer ${token}` } })
-		if (response.status === 401) await invalidateAccessToken(token)
+		const response = await fetch(MODELS_URL, {
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
+		})
+		if (response.status === 401) invalidateAccessToken(token)
 		if (!response.ok) throw new Error(`models: HTTP ${response.status}`)
 
 		return listedModels(await response.json())
