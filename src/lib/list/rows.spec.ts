@@ -14,7 +14,7 @@ import {
 	renderStats,
 	STATS_ATTRIBUTE,
 } from './rows'
-import type { DiffStats } from './stats'
+import { CODE_TOOLTIP_HEADING, type DiffStats } from './stats'
 
 // Totals whose code counts match, so the row has no code part.
 const plain = (additions: number, deletions: number, files: number): DiffStats => ({
@@ -119,19 +119,38 @@ describe('renderStats', () => {
 		})
 
 		const element = meta.lastElementChild as HTMLElement
-		expect(element.textContent).toBe('·+1 717−67·30 files·code+312−41')
-		const code = element.lastElementChild as HTMLElement
+		expect(element.textContent).toBe('·+1 717−67(+312−41)·30 files')
+		const code = element.querySelector('[title]') as HTMLElement
+		expect(code.textContent).toBe('(+312−41)')
 		expect(code.title).toBe(
-			'Excluded: tests +1 380 −10, blank and comment lines +25 −16.\n' +
+			`${CODE_TOOLTIP_HEADING}\n` +
+				'Excluded: tests +1 380 −10, blank and comment lines +25 −16.\n' +
 				'Comment lines are detected approximately.',
 		)
 		expect(code.querySelector('.fgColor-success')?.textContent).toBe('+312')
 		expect(code.querySelector('.fgColor-danger')?.textContent).toBe('−41')
-		expect(code.previousElementSibling?.getAttribute('aria-hidden')).toBe('true')
+		expect(code.style.opacity).toBe('0.7')
+		expect(code.previousElementSibling?.textContent).toBe('−67')
+		expect(code.nextElementSibling?.getAttribute('aria-hidden')).toBe('true')
 
 		renderStats(meta, 'TanStack/router/8612', plain(1717, 67, 30))
 		expect(meta.lastElementChild?.textContent).toBe('·+1 717−67·30 files')
 		expect(meta.querySelector(`[${STATS_ATTRIBUTE}] [title]`)).toBeNull()
+	})
+
+	it('shows zero code counts for a pull request without code', () => {
+		const meta = findPullRows()[0]?.meta as HTMLElement
+		const stats = {
+			...plain(40, 2, 3),
+			code: { additions: 0, deletions: 0 },
+			excluded: { docs: { additions: 40, deletions: 2 } },
+		}
+		renderStats(meta, 'TanStack/router/8612', stats)
+		const element = meta.lastElementChild as HTMLElement
+		renderStats(meta, 'TanStack/router/8612', stats)
+
+		expect(meta.lastElementChild).toBe(element)
+		expect(element.textContent).toBe('·+40−2(+0−0)·3 files')
 	})
 
 	it('updates the title when only what was left out changes', () => {
@@ -147,7 +166,7 @@ describe('renderStats', () => {
 		})
 
 		expect(meta.querySelector(`[${STATS_ATTRIBUTE}] [title]`)?.getAttribute('title')).toMatch(
-			/^Excluded: docs \+10\./,
+			/\nExcluded: docs \+10\./,
 		)
 	})
 })

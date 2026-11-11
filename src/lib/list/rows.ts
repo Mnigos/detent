@@ -131,16 +131,20 @@ export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): v
 	const element = document.createElement('span')
 	element.setAttribute(STATS_ATTRIBUTE, text)
 	element.style.cssText = 'display:inline-flex;gap:4px;margin-left:4px;white-space:nowrap'
+	const separator = () => {
+		const dot = span('·')
+		dot.setAttribute('aria-hidden', 'true')
+
+		return dot
+	}
 	element.append(
-		span('·'),
+		separator(),
 		span(`+${formatCount(stats.additions)}`, 'fgColor-success'),
 		span(`−${formatCount(stats.deletions)}`, 'fgColor-danger'),
-		span('·'),
+		...(hasExcludedLines(stats) ? [codePart(stats)] : []),
+		separator(),
 		span(formatFiles(stats.files)),
 	)
-	element.firstElementChild?.setAttribute('aria-hidden', 'true')
-	element.children[3]?.setAttribute('aria-hidden', 'true')
-	if (hasExcludedLines(stats)) element.append(...codePart(stats))
 	if (existing) existing.replaceWith(element)
 	else meta.append(element)
 	settle(meta)
@@ -166,20 +170,17 @@ export function renderConflicts(meta: HTMLElement, state: ConflictMarker): void 
 	settle(meta)
 }
 
-// What the pull request changes in code, next to the totals; its title says what was left out.
-function codePart(stats: DiffStats): HTMLElement[] {
-	const code = span('')
+// What the pull request changes in code, in parentheses after the totals and dimmed so the totals lead;
+// its title says what the numbers are and what was left out.
+function codePart(stats: DiffStats): HTMLElement {
+	const code = span('(')
 	code.title = codeTooltip(stats)
-	code.style.cssText = 'display:inline-flex;gap:4px;font-weight:600'
-	code.append(
-		span('code'),
-		span(`+${formatCount(stats.code.additions)}`, 'fgColor-success'),
-		span(`−${formatCount(stats.code.deletions)}`, 'fgColor-danger'),
-	)
-	const separator = span('·')
-	separator.setAttribute('aria-hidden', 'true')
+	code.style.cssText = 'opacity:0.7'
+	const deletions = span(`−${formatCount(stats.code.deletions)}`, 'fgColor-danger')
+	deletions.style.marginLeft = '4px'
+	code.append(span(`+${formatCount(stats.code.additions)}`, 'fgColor-success'), deletions, ')')
 
-	return [separator, code]
+	return code
 }
 
 export function clearStats(meta: HTMLElement): void {

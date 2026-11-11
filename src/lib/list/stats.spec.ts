@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { codeTooltip, diffStats, formatCount, formatFiles, hasExcludedLines } from './stats'
+import {
+	CODE_TOOLTIP_HEADING,
+	codeTooltip,
+	diffStats,
+	formatCount,
+	formatFiles,
+	hasExcludedLines,
+} from './stats'
 
 const DIFF = `diff --git a/a.ts b/a.ts
 --- a/a.ts
@@ -77,7 +84,7 @@ describe('code part', () => {
 		expect(hasExcludedLines(stats({ additions: 10, deletions: 3 }))).toBe(true)
 	})
 
-	it('lists each excluded kind in a fixed order with the sides it touched', () => {
+	it('says what the numbers are, then lists each excluded kind in a fixed order with the sides it touched', () => {
 		expect(
 			codeTooltip({
 				excluded: {
@@ -90,12 +97,13 @@ describe('code part', () => {
 				},
 			}),
 		).toBe(
-			'Excluded: tests +1 280 −10, docs +60, lockfiles +45 −5, generated +12, ' +
+			`${CODE_TOOLTIP_HEADING}\n` +
+				'Excluded: tests +1 280 −10, docs +60, lockfiles +45 −5, generated +12, ' +
 				'blank and comment lines +20 −3, whitespace-only changes +7 −7.\n' +
 				'Comment lines are detected approximately.',
 		)
 		expect(codeTooltip({ excluded: { docs: { additions: 0, deletions: 3 } } })).toBe(
-			'Excluded: docs −3.\nComment lines are detected approximately.',
+			`${CODE_TOOLTIP_HEADING}\nExcluded: docs −3.\nComment lines are detected approximately.`,
 		)
 	})
 })
