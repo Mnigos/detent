@@ -180,6 +180,14 @@ describe('ChatGPT account', () => {
 		expect(button('Continue with ChatGPT')).toBeUndefined()
 	})
 
+	it('selects a Luna model by default even when a heavier one is listed first', async () => {
+		await render(CHATGPT, {
+			...SIGNED_IN,
+			models: [{ slug: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }, ...SIGNED_IN.models],
+		})
+		expect(container.querySelector('select')?.value).toBe('gpt-6-luna')
+	})
+
 	it('keeps the chosen model and saves a new choice', async () => {
 		await render({ ...CHATGPT, chatgptModel: 'gpt-5.6-terra' }, SIGNED_IN)
 		const select = container.querySelector('select') as HTMLSelectElement

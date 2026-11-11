@@ -83,10 +83,10 @@ describe('chatGptProvider', () => {
 		await expect(chatGptProvider(SETTINGS)).resolves.toMatchObject({ model: 'gpt-6-luna' })
 	})
 
-	it('takes the first listed model when none is chosen', async () => {
+	it('takes the Luna default when none is chosen', async () => {
 		vi.mocked(listModels).mockResolvedValue([
+			{ slug: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
 			{ slug: 'gpt-6-luna', name: 'GPT-6 Luna' },
-			{ slug: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
 		])
 		await expect(chatGptProvider({ ...SETTINGS, chatgptModel: '' })).resolves.toMatchObject({
 			model: 'gpt-6-luna',

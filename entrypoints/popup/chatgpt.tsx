@@ -6,7 +6,7 @@ import { FIELD } from './styles'
 interface ChatGptAccountProps {
 	/** Resolves when the worker answers; the section waits in a Suspense boundary meanwhile. */
 	status: Promise<ChatGptStatus>
-	/** The chosen model slug; empty means the first one the account lists. */
+	/** The chosen model slug; empty means a Luna model when the account lists one, else the first. */
 	model: string
 	isLoading: boolean
 }

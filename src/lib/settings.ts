@@ -11,7 +11,7 @@ export interface Settings {
 	openRouterKey: string
 	/** The OpenRouter model; ChatGPT keeps its own choice in `chatgptModel`. */
 	model: string
-	/** A model slug from the signed-in ChatGPT account's list; empty takes the first listed one. */
+	/** A model slug from the signed-in ChatGPT account's list; empty takes the default (Luna). */
 	chatgptModel: string
 	/** Off keeps GitHub's pages untouched: no layers, no requests. */
 	isEnabled: boolean

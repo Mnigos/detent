@@ -63,14 +63,14 @@ async function ask<T>(
 
 /**
  * ChatGPT, when an account is signed in with plan usage. The model is the one chosen in the popup,
- * or the first one the account lists.
+ * or a Luna model when the account lists one, else the first listed.
  */
 export async function chatGptProvider({
 	chatgptModel,
 }: Settings): Promise<ModelProvider | undefined> {
 	if (!(await readAccount())?.tokens) return undefined
 
-	// A saved model the account no longer lists falls back to the first one, as the popup shows it.
+	// A saved model the account no longer lists falls back to the default, as the popup shows it.
 	// Without the list (offline) the saved choice is used as it is.
 	const models = await listModels().catch(() => [])
 	const model = pickModel(chatgptModel, models)
