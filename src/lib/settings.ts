@@ -46,9 +46,17 @@ export async function readSettings(): Promise<Settings> {
 	}
 }
 
-export async function writeSettings(partial: Partial<Settings>): Promise<Settings> {
-	const settings = { ...(await readSettings()), ...partial }
-	await browser.storage.local.set({ [SETTINGS_KEY]: settings })
+let pending: Promise<unknown> = Promise.resolve()
 
-	return settings
+// Each write saves the whole record; one queue keeps two quick changes from undoing each other.
+export function writeSettings(partial: Partial<Settings>): Promise<Settings> {
+	const write = pending.then(async () => {
+		const settings = { ...(await readSettings()), ...partial }
+		await browser.storage.local.set({ [SETTINGS_KEY]: settings })
+
+		return settings
+	})
+	pending = write.catch(() => undefined)
+
+	return write
 }
