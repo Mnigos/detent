@@ -109,12 +109,16 @@ async function requestMergeBox({ owner, repo, number }: PullRequestRef, query = 
 /**
  * Asks the merge box with GitHub's default method, which decides conflicts. Only when that answer is clean and the
  * viewer may rebase does a second request ask for rebase merging, to tell a clean pull request from one GitHub
- * cannot rebase.
+ * cannot rebase. When `isPaused` turns true in between, that request is not sent and the call throws RateLimitError.
  */
-export async function fetchConflictState(ref: PullRequestRef): Promise<ConflictState> {
+export async function fetchConflictState(
+	ref: PullRequestRef,
+	isPaused: () => boolean = () => false,
+): Promise<ConflictState> {
 	const body = await requestMergeBox(ref)
 	const state = parseMergeBox(body)
 	if (state !== 'clean' || !allowsRebase(body)) return state
+	if (isPaused()) throw new RateLimitError()
 
 	return parseMergeBox(await requestMergeBox(ref, REBASE_QUERY), 'rebase')
 }

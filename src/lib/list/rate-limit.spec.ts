@@ -87,6 +87,23 @@ describe('createRateLimitPause', () => {
 		pause.stop()
 	})
 
+	it('gives a pause started by a network error no grace, so such errors cannot chain pauses', async () => {
+		const pause = await createRateLimitPause(vi.fn())
+		pause.signal(undefined, true)
+		expect(pause.isThrottled()).toBe(true)
+		await vi.advanceTimersByTimeAsync(60_000)
+		expect(pause.isThrottled()).toBe(false)
+		await expect(stored()).resolves.toMatchObject({ inferred: true })
+
+		// GitHub's own answer during an inferred pause brings the grace back.
+		pause.signal(undefined, true)
+		pause.signal()
+		await vi.advanceTimersByTimeAsync(120_000)
+		expect(pause.isPaused()).toBe(false)
+		expect(pause.isThrottled()).toBe(true)
+		pause.stop()
+	})
+
 	it("honours another tab's pause, stored before or written while open", async () => {
 		await fakeBrowser.storage.local.set({
 			[RATE_LIMIT_KEY]: { until: Date.now() + 30_000, strikes: 1 },

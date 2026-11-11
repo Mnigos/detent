@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser'
+import { isRateLimitPaused } from '../list/rate-limit'
 import type { PullRequestLocation } from '../pull-request-url'
 import { type RateLimit, readRateLimit } from '../rate-limit'
 
@@ -43,6 +44,8 @@ export async function fetchPullRequestDiff({
 					Math.min(RETRY_CAP_MILLISECONDS, RETRY_MILLISECONDS * 2 ** (attempt - 1)),
 				),
 			)
+		// While GitHub rate-limits the lists, a retry would only add to it.
+		if (attempt > 0 && (await isRateLimitPaused())) throw new PullRequestDiffError(status, {})
 		const response = await fetch(`https://github.com/${owner}/${repo}/pull/${number}.diff`, {
 			credentials: 'include',
 		})

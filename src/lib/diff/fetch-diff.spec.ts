@@ -7,7 +7,12 @@ import {
 	requestPullRequestDiff,
 } from './fetch-diff'
 
-vi.mock('wxt/browser', () => ({ browser: { runtime: { sendMessage: vi.fn() } } }))
+vi.mock('wxt/browser', () => ({
+	browser: {
+		runtime: { sendMessage: vi.fn() },
+		storage: { local: { get: vi.fn(async () => ({})) } },
+	},
+}))
 
 const location = { owner: 'TanStack', repo: 'router', number: 8170 }
 
@@ -46,6 +51,22 @@ describe('fetchPullRequestDiff', () => {
 
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })))
 		await expect(fetchPullRequestDiff(location)).rejects.toMatchObject({ rateLimit: undefined })
+	})
+
+	it('does not retry a 5xx while the lists are paused for a rate limit', async () => {
+		vi.useFakeTimers()
+		vi.mocked(browser.storage.local.get).mockResolvedValue({
+			rateLimitedUntil: { until: Date.now() + 60_000, strikes: 1 },
+		} as never)
+		const fetchMock = vi.fn().mockResolvedValue(new Response('', { status: 503 }))
+		vi.stubGlobal('fetch', fetchMock)
+		const failed = fetchPullRequestDiff(location)
+		const rejection = expect(failed).rejects.toMatchObject({ status: 503, rateLimit: {} })
+		await vi.advanceTimersByTimeAsync(2000)
+		await rejection
+		expect(fetchMock).toHaveBeenCalledOnce()
+		vi.mocked(browser.storage.local.get).mockResolvedValue({} as never)
+		vi.useRealTimers()
 	})
 
 	it('retries a 5xx with backoff while GitHub generates a large diff and gives up after six tries', async () => {

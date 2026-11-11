@@ -85,6 +85,8 @@ function createPool(load: (ref: Ref) => Promise<void>, isPaused: () => boolean) 
 }
 
 export async function startListStats() {
+	// A pause that ends while the caches load resumes nothing: mount() applies with the pause already over.
+	let resume = () => {}
 	const [stats, conflicts, pause]: [
 		StatsCache,
 		ConflictsCache,
@@ -93,9 +95,7 @@ export async function startListStats() {
 		readStatsCache(),
 		readConflictsCache(),
 		// After a rate limit, in this tab or another, the rows still missing data are asked again.
-		createRateLimitPause(() => {
-			if (!isStopped) apply()
-		}),
+		createRateLimitPause(() => resume()),
 	])
 	// Signed out GitHub serves no merge box, so a signed-out list asks for nothing.
 	let canAskConflicts = isSignedIn()
@@ -107,6 +107,9 @@ export async function startListStats() {
 	const conflictsPool = createPool(loadConflicts, () => pause.isPaused())
 	let isStopped = false
 	const timers = new Set<ReturnType<typeof setTimeout>>()
+	resume = () => {
+		if (!isStopped) apply()
+	}
 
 	// Every pass walks the rows on the page: rows React re-rendered get their stats back, new rows
 	// (pagination, a changed filter) get theirs, and stale or missing ones are queued once.
@@ -155,7 +158,7 @@ export async function startListStats() {
 				error instanceof PullRequestDiffError &&
 				(error.rateLimit || (error.status === 0 && pause.isThrottled()))
 			)
-				return rateLimited(error.rateLimit?.retryAfterMilliseconds)
+				return rateLimited(error.rateLimit?.retryAfterMilliseconds, !error.rateLimit)
 
 			console.warn('[detent] diff stats', key, error)
 			entry = { failed: true, at: Date.now() }
@@ -169,12 +172,12 @@ export async function startListStats() {
 		const key = statsKey(ref)
 		let state: ConflictState
 		try {
-			state = await fetchConflictState(ref)
+			state = await fetchConflictState(ref, () => pause.isPaused())
 			refusals = 0
 		} catch (error) {
 			// GitHub's 429 may come without CORS headers, so the content script sees only a network error.
 			if (error instanceof RateLimitError) return rateLimited(error.retryAfterMilliseconds)
-			if (error instanceof TypeError && pause.isThrottled()) return rateLimited()
+			if (error instanceof TypeError && pause.isThrottled()) return rateLimited(undefined, true)
 			// A 401, or refusals in a row, means signed out in another tab; one 403 or 404 may be a rate
 			// limit or a single pull request, so that row only waits for its retry.
 			if (error instanceof MergeBoxUnavailableError) {
@@ -201,8 +204,8 @@ export async function startListStats() {
 
 	// Neither pool sends anything until the pause is over; the pause then applies again, which queues only the rows
 	// still without fresh data.
-	function rateLimited(retryAfterMilliseconds?: number) {
-		const length = pause.signal(retryAfterMilliseconds)
+	function rateLimited(retryAfterMilliseconds?: number, isInferred = false) {
+		const length = pause.signal(retryAfterMilliseconds, isInferred)
 		if (length !== undefined)
 			console.info(
 				`[detent] GitHub rate limit, list requests pause for ${Math.ceil(length / 1000)} s`,

@@ -138,7 +138,9 @@ Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack
   conflicts pool, and a refusal (401, 403, 404) of either counts as one.
 - Rate limits: a 429, or a 403 with `Retry-After`, `X-RateLimit-Remaining: 0` or "rate limit" in its body, on the
   merge box or the `.diff` is not a refusal. GitHub's 429 may come without CORS headers, so the content script can
-  see only `TypeError: Failed to fetch`; during a pause, or within a minute of one, that counts as the limit too.
+  see only `TypeError: Failed to fetch`; during a pause, or within a minute of one GitHub's own answer started,
+  that counts as the limit too, so network errors alone never chain one pause onto the next. The rebase follow-up
+  request and the service worker's 5xx retries are not sent during a pause either.
   Both list pools then pause for every tab (`rateLimitedUntil` in `chrome.storage.local`) for `Retry-After`, or a
   minute, doubled for each repeat within ten minutes of the last pause, up to ten minutes. Nothing is cached for a
   rate-limited row; after the pause the list asks again only for rows still without fresh data.
