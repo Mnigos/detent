@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RateLimitError, RequestPausedError } from '../rate-limit'
 import {
 	allowsRebase,
+	blocksOnUnresolvedComments,
 	fetchConflictState,
 	isSignedIn,
 	MergeBoxUnavailableError,
@@ -20,6 +21,32 @@ const conflictCondition = (result: string, conflicts: string[] = []) => ({
 	result,
 	conflicts,
 	isConflictResolvableInWeb: true,
+})
+
+// The PULL_REQUEST_RULES condition with the given rule rollups, as GitHub's merge status panel reads it.
+const rulesCondition = (result: string, ruleRollups: unknown[]) => ({
+	type: 'PULL_REQUEST_RULES',
+	result,
+	ruleRollups,
+})
+
+// Branch protection's "Require conversation resolution before merging".
+const threadResolutionRule = (result: string) => ({
+	ruleType: 'REQUIRED_REVIEW_THREAD_RESOLUTION',
+	result,
+	metadata: null,
+})
+
+// A ruleset's pull request rule; GitHub's bundle lowercases the reasons before comparing them.
+const pullRequestRule = (result: string, failureReasons: string[]) => ({
+	ruleType: 'PULL_REQUEST',
+	result,
+	metadata: {
+		requiredReviewers: 1,
+		approvedReviewers: 1,
+		requiresCodeowners: false,
+		failureReasons,
+	},
 })
 
 // The viewer's direct merge action with each method in the given allowable status.
@@ -181,6 +208,75 @@ describe('isSignedIn', () => {
 	})
 })
 
+describe('blocksOnUnresolvedComments', () => {
+	const open = (conditions: unknown[]) =>
+		mergeBox({ state: 'OPEN', mergeStateStatus: 'BLOCKED' }, conditions)
+
+	it('reads a failed conversation resolution rule of branch protection as blocking', () => {
+		expect(
+			blocksOnUnresolvedComments(
+				open([rulesCondition('FAILED', [threadResolutionRule('FAILED')])]),
+			),
+		).toBe(true)
+	})
+
+	it('reads a failed ruleset pull request rule that names thread resolution as blocking, in either case', () => {
+		for (const reason of ['THREAD_RESOLUTION_REQUIRED', 'thread_resolution_required'])
+			expect(
+				blocksOnUnresolvedComments(
+					open([
+						rulesCondition('FAILED', [
+							pullRequestRule('FAILED', ['MORE_REVIEWS_REQUIRED', reason]),
+						]),
+					]),
+				),
+			).toBe(true)
+	})
+
+	it('does not block when the repository does not require resolution, however many threads are open', () => {
+		// The merge box carries no thread count; threads only matter through a failed rule.
+		expect(blocksOnUnresolvedComments(open([]))).toBe(false)
+		expect(
+			blocksOnUnresolvedComments(
+				open([rulesCondition('FAILED', [pullRequestRule('FAILED', ['CHANGES_REQUESTED'])])]),
+			),
+		).toBe(false)
+		expect(
+			blocksOnUnresolvedComments(
+				open([conflictCondition('FAILED', ['src/a.ts']), { type: 'PULL_REQUEST_STATE' }]),
+			),
+		).toBe(false)
+	})
+
+	it('does not block when the rule passes, as it does once every thread is resolved', () => {
+		expect(
+			blocksOnUnresolvedComments(
+				open([
+					rulesCondition('PASSED', [
+						threadResolutionRule('PASSED'),
+						pullRequestRule('PASSED', ['thread_resolution_required']),
+					]),
+				]),
+			),
+		).toBe(false)
+	})
+
+	it('reads nothing from a closed pull request or an unusable body', () => {
+		const failed = [rulesCondition('FAILED', [threadResolutionRule('FAILED')])]
+		expect(
+			blocksOnUnresolvedComments(mergeBox({ state: 'MERGED', mergeStateStatus: 'CLEAN' }, failed)),
+		).toBe(false)
+		expect(blocksOnUnresolvedComments({ mergeRequirements: { conditions: failed } })).toBe(false)
+		expect(
+			blocksOnUnresolvedComments({
+				pullRequest: { state: 'OPEN' },
+				mergeRequirements: { conditions: [{ ruleRollups: 'FAILED' }] },
+			}),
+		).toBe(false)
+		expect(blocksOnUnresolvedComments(undefined)).toBe(false)
+	})
+})
+
 describe('fetchConflictState', () => {
 	const ref = { owner: 'o', repo: 'r', number: 7 }
 	const DEFAULT_URL = 'https://github.com/o/r/pull/7/page_data/merge_box'
@@ -204,7 +300,10 @@ describe('fetchConflictState', () => {
 	it('asks the merge box with GitHub default method and the session, and parses it', async () => {
 		const fetch = stubMergeBox({ default: mergeBox({ state: 'OPEN', mergeStateStatus: 'DIRTY' }) })
 
-		await expect(fetchConflictState(ref)).resolves.toBe('conflicts')
+		await expect(fetchConflictState(ref)).resolves.toEqual({
+			state: 'conflicts',
+			unresolved: false,
+		})
 		expect(fetch).toHaveBeenCalledWith(
 			DEFAULT_URL,
 			expect.objectContaining({ credentials: 'include' }),
@@ -224,7 +323,10 @@ describe('fetchConflictState', () => {
 			),
 		})
 
-		await expect(fetchConflictState(ref)).resolves.toBe('conflicts')
+		await expect(fetchConflictState(ref)).resolves.toEqual({
+			state: 'conflicts',
+			unresolved: false,
+		})
 		expect(askedUrls(fetch)).toEqual([DEFAULT_URL])
 	})
 
@@ -237,7 +339,10 @@ describe('fetchConflictState', () => {
 			}),
 		})
 
-		await expect(fetchConflictState(ref)).resolves.toBe('conflicts')
+		await expect(fetchConflictState(ref)).resolves.toEqual({
+			state: 'conflicts',
+			unresolved: false,
+		})
 		expect(askedUrls(fetch)).toEqual([DEFAULT_URL])
 	})
 
@@ -253,12 +358,51 @@ describe('fetchConflictState', () => {
 			),
 		})
 
-		await expect(fetchConflictState(ref)).resolves.toBe('rebase-blocked')
+		await expect(fetchConflictState(ref)).resolves.toEqual({
+			state: 'rebase-blocked',
+			unresolved: false,
+		})
 		expect(askedUrls(fetch)).toEqual([DEFAULT_URL, REBASE_URL])
 		expect(fetch).toHaveBeenLastCalledWith(
 			REBASE_URL,
 			expect.objectContaining({ credentials: 'include' }),
 		)
+	})
+
+	it('reports unresolved comments next to a conflict, from the same single answer', async () => {
+		const fetch = stubMergeBox({
+			default: mergeBox(
+				{ state: 'OPEN', mergeStateStatus: 'DIRTY', viewerMergeActions: squashOnly },
+				[
+					conflictCondition('FAILED', ['src/index.ts']),
+					rulesCondition('FAILED', [threadResolutionRule('FAILED')]),
+				],
+			),
+		})
+
+		await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'conflicts', unresolved: true })
+		expect(askedUrls(fetch)).toEqual([DEFAULT_URL])
+	})
+
+	it('reads unresolved comments from the default answer when a rebase request follows', async () => {
+		const blocked = (conditions: unknown[]) =>
+			mergeBox(
+				{ state: 'OPEN', mergeStateStatus: 'BLOCKED', viewerMergeActions: rebaseAllowed },
+				conditions,
+			)
+		const fetch = stubMergeBox({
+			default: blocked([
+				conflictCondition('PASSED'),
+				rulesCondition('FAILED', [pullRequestRule('FAILED', ['thread_resolution_required'])]),
+			]),
+			rebase: blocked([conflictCondition('FAILED')]),
+		})
+
+		await expect(fetchConflictState(ref)).resolves.toEqual({
+			state: 'rebase-blocked',
+			unresolved: true,
+		})
+		expect(askedUrls(fetch)).toEqual([DEFAULT_URL, REBASE_URL])
 	})
 
 	it('answers clean when both the default and the rebase answer are clean', async () => {
@@ -268,7 +412,7 @@ describe('fetchConflictState', () => {
 		)
 		const fetch = stubMergeBox({ default: clean, rebase: clean })
 
-		await expect(fetchConflictState(ref)).resolves.toBe('clean')
+		await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'clean', unresolved: false })
 		expect(askedUrls(fetch)).toEqual([DEFAULT_URL, REBASE_URL])
 	})
 
@@ -281,7 +425,7 @@ describe('fetchConflictState', () => {
 				]),
 			})
 
-			await expect(fetchConflictState(ref)).resolves.toBe('clean')
+			await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'clean', unresolved: false })
 			expect(askedUrls(fetch)).toEqual([DEFAULT_URL])
 		}
 	})
@@ -296,15 +440,15 @@ describe('fetchConflictState', () => {
 			default: clean,
 			rebase: mergeBox({ state: 'OPEN', mergeStateStatus: 'CLEAN' }, [methodFailed]),
 		})
-		await expect(fetchConflictState(ref)).resolves.toBe('unknown')
+		await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'unknown', unresolved: false })
 
 		stubMergeBox({ default: clean, rebase: { error: 'Server Error' } })
-		await expect(fetchConflictState(ref)).resolves.toBe('unknown')
+		await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'unknown', unresolved: false })
 
 		vi.stubGlobal('fetch', async (url: string) =>
 			url === REBASE_URL ? new Response('', { status: 502 }) : Response.json(clean),
 		)
-		await expect(fetchConflictState(ref)).resolves.toBe('unknown')
+		await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'unknown', unresolved: false })
 	})
 
 	it('throws for a refused merge box, so the list stops asking', async () => {
@@ -358,9 +502,9 @@ describe('fetchConflictState', () => {
 
 	it('answers unknown for a server error or a body that is not JSON', async () => {
 		vi.stubGlobal('fetch', async () => new Response('', { status: 502 }))
-		await expect(fetchConflictState(ref)).resolves.toBe('unknown')
+		await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'unknown', unresolved: false })
 
 		vi.stubGlobal('fetch', async () => new Response('<html>', { status: 200 }))
-		await expect(fetchConflictState(ref)).resolves.toBe('unknown')
+		await expect(fetchConflictState(ref)).resolves.toEqual({ state: 'unknown', unresolved: false })
 	})
 })

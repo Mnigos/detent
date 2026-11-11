@@ -103,10 +103,10 @@ describe('createListRequests', () => {
 		github.release()
 		await expect(Promise.all(requests)).resolves.toEqual([
 			'',
-			'conflicts',
+			{ state: 'conflicts', unresolved: false },
 			new Map(),
 			'',
-			'conflicts',
+			{ state: 'conflicts', unresolved: false },
 		])
 		expect(github.fetch).toHaveBeenCalledTimes(5)
 	})

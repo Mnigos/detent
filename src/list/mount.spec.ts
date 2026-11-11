@@ -16,7 +16,12 @@ import { FETCH_LIST_HEADS_MESSAGE, type PullHead } from '@/src/lib/list/heads'
 import { createListRequests } from '@/src/lib/list/list-requests'
 import { RATE_LIMIT_KEY } from '@/src/lib/list/rate-limit'
 import { createRequestQueue } from '@/src/lib/list/request-queue'
-import { CONFLICTS_ATTRIBUTE, REBASE_BLOCKED_TITLE } from '@/src/lib/list/rows'
+import {
+	CONFLICTS_ATTRIBUTE,
+	REBASE_BLOCKED_TITLE,
+	UNRESOLVED_ATTRIBUTE,
+	UNRESOLVED_TITLE,
+} from '@/src/lib/list/rows'
 import { errorResponse } from '@/src/lib/rate-limit'
 import { startListStats } from './mount'
 
@@ -65,13 +70,31 @@ const markers = () =>
 		text: marker.textContent,
 	}))
 
+const rowNumber = (element: Element) =>
+	Number(
+		/\/pull\/(\d+)/.exec(
+			element.closest('li')?.querySelector('a[href*="/pull/"]')?.getAttribute('href') ?? '',
+		)?.[1],
+	)
+
+const unresolvedRows = () =>
+	[...document.querySelectorAll(`[${UNRESOLVED_ATTRIBUTE}]`)].map(rowNumber)
+
+const rowMeta = (number: number) =>
+	document
+		.querySelector(`li a[href$="/pull/${number}"]`)
+		?.closest('li')
+		?.querySelector(`[${CONFLICTS_ATTRIBUTE}]`)?.parentElement as HTMLElement
+
 const marked = () =>
 	[...document.querySelectorAll(`[${CONFLICTS_ATTRIBUTE}]`)].map((marker) =>
 		marker.closest('li')?.querySelector('a[href*="/pull/"]')?.getAttribute('href'),
 	)
 
 // Answers each pull request number with a mergeStateStatus, REBASE_BLOCKED (clean by default and rebase merging
-// offered, but the conflict condition fails when asked for rebase), or a status code. `delay` holds each answer back.
+// offered, but the conflict condition fails when asked for rebase), or a status code. A status followed by
+// +UNRESOLVED fails the conversation resolution rule too, +THREADS passes it (threads open, resolution not required).
+// `delay` holds each answer back.
 function stubMergeBox(states: Record<number, string | number>, delay = 0) {
 	const fetch = vi.fn(async (url: string) => {
 		if (delay) await new Promise((done) => setTimeout(done, delay))
@@ -94,6 +117,27 @@ function stubMergeBox(states: Record<number, string | number>, delay = 0) {
 					conditions: url.includes('merge_method=REBASE')
 						? [{ type: 'PULL_REQUEST_MERGE_CONFLICT_STATE', result: 'FAILED', conflicts: [] }]
 						: [],
+				},
+			})
+
+		const [status, rule] = state.split('+')
+		if (rule)
+			return Response.json({
+				pullRequest: { state: 'OPEN', mergeStateStatus: status },
+				mergeRequirements: {
+					conditions: [
+						{
+							type: 'PULL_REQUEST_RULES',
+							result: rule === 'UNRESOLVED' ? 'FAILED' : 'PASSED',
+							ruleRollups: [
+								{
+									ruleType: 'REQUIRED_REVIEW_THREAD_RESOLUTION',
+									result: rule === 'UNRESOLVED' ? 'FAILED' : 'PASSED',
+									metadata: null,
+								},
+							],
+						},
+					],
 				},
 			})
 
@@ -128,7 +172,7 @@ function stubServiceWorker() {
 			return { heads: listHeads }
 		}
 		if (message.type === FETCH_CONFLICTS_MESSAGE)
-			return list.conflicts(message).then((state) => ({ state }), errorResponse)
+			return list.conflicts(message).catch(errorResponse)
 
 		return undefined
 	}) as never)
@@ -195,6 +239,73 @@ describe('list merge conflicts', () => {
 			'o/r/2': { state: 'conflicts' },
 			'o/r/3': { state: 'clean' },
 		})
+	})
+
+	it('marks unresolved comments only where they block the merge, after a conflict marker', async () => {
+		renderList([
+			{ number: 1 },
+			{ number: 2 },
+			{ number: 3 },
+			{ number: 4 },
+			{ number: 5, icon: 'octicon-git-pull-request-draft' },
+		])
+		const fetch = stubMergeBox({
+			1: 'BLOCKED+UNRESOLVED',
+			2: 'DIRTY+UNRESOLVED',
+			3: 'CLEAN+THREADS',
+			4: 'DIRTY',
+			5: 'BLOCKED+UNRESOLVED',
+		})
+		await mount()
+
+		await vi.waitFor(() => expect(unresolvedRows()).toEqual([1, 2]))
+		expect(markers()).toEqual([
+			{ number: 2, state: 'conflicts', text: '·Conflicts' },
+			{ number: 4, state: 'conflicts', text: '·Conflicts' },
+		])
+		const second = document.querySelector(`[${UNRESOLVED_ATTRIBUTE}]`)
+		expect(second?.getAttribute('title')).toBe(UNRESOLVED_TITLE)
+		expect(second?.textContent).toBe('·Unresolved comments')
+		const row2 = rowMeta(2)
+		expect([...row2.children].slice(-2).map((child) => child.getAttributeNames()[0])).toEqual([
+			CONFLICTS_ATTRIBUTE,
+			UNRESOLVED_ATTRIBUTE,
+		])
+		expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3, 4])
+		await expect(readConflictsCache()).resolves.toEqual({
+			'o/r/1': { state: 'clean', unresolved: true, at: expect.any(Number) },
+			'o/r/2': { state: 'conflicts', unresolved: true, at: expect.any(Number) },
+			'o/r/3': { state: 'clean', at: expect.any(Number) },
+			'o/r/4': { state: 'conflicts', at: expect.any(Number) },
+		})
+	})
+
+	it('shows a cached unresolved state while fresh and drops it once stale or the row is a draft', async () => {
+		const now = Date.now()
+		await fakeBrowser.storage.local.set({
+			[CONFLICTS_KEY]: {
+				'o/r/1': { state: 'clean', unresolved: true, at: now - 1000 },
+				'o/r/2': { state: 'clean', unresolved: true, at: now - CONFLICTS_TTL_MILLISECONDS - 1 },
+				'o/r/3': { state: 'clean', unresolved: true, at: now - 1000 },
+			},
+		})
+		renderList([
+			{ number: 1 },
+			{ number: 2 },
+			{ number: 3, icon: 'octicon-git-pull-request-draft' },
+		])
+		const fetch = stubMergeBox({ 2: 'CLEAN' })
+		await mount()
+
+		expect(unresolvedRows()).toEqual([1])
+		await vi.waitFor(() => expect(mergeBoxCalls(fetch)).toEqual([2]))
+		await vi.waitFor(async () =>
+			expect((await readConflictsCache())['o/r/2']).toEqual({
+				state: 'clean',
+				at: expect.any(Number),
+			}),
+		)
+		expect(unresolvedRows()).toEqual([1])
 	})
 
 	it('swaps the marker when a stale state comes back different', async () => {

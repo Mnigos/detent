@@ -7,6 +7,12 @@ export const FETCH_CONFLICTS_MESSAGE = 'detent:fetch-conflicts'
 /** `rebase-blocked`: a merge commit or squash would go through, "Rebase and merge" would not. */
 export type ConflictState = 'conflicts' | 'rebase-blocked' | 'clean' | 'unknown'
 
+/** What a row learns from the merge box: its conflict state, and whether unresolved conversations block the merge. */
+export interface MergeBoxState {
+	state: ConflictState
+	unresolved: boolean
+}
+
 type PullRequestRef = { owner: string; repo: string; number: number }
 
 /** `default`: asked without a merge method, so GitHub picks one. `rebase`: asked for "Rebase and merge". */
@@ -14,6 +20,10 @@ export type MergeBoxMode = 'default' | 'rebase'
 
 const CONFLICT_CONDITION = 'PULL_REQUEST_MERGE_CONFLICT_STATE'
 const MERGE_METHOD_CONDITION = 'PULL_REQUEST_MERGE_METHOD'
+// A rule rollup of the PULL_REQUEST_RULES condition: the branch protection setting has its own rule type, a ruleset's
+// pull request rule lists the reason among its failures.
+const THREAD_RESOLUTION_RULE = 'REQUIRED_REVIEW_THREAD_RESOLUTION'
+const THREAD_RESOLUTION_REASON = 'thread_resolution_required'
 // The statuses with which GitHub's merge button offers a method.
 const ALLOWED = new Set(['ALLOWED', 'ALLOWED_WITH_BYPASS'])
 
@@ -57,6 +67,28 @@ export function parseMergeBox(body: unknown, mode: MergeBoxMode = 'default'): Co
 	const hasConflictingFiles = Array.isArray(failed.conflicts) && failed.conflicts.length > 0
 
 	return mode === 'rebase' && !hasConflictingFiles ? 'rebase-blocked' : 'conflicts'
+}
+
+const failureReasons = (rule: Record<string, unknown>) =>
+	isRecord(rule.metadata) && Array.isArray(rule.metadata.failureReasons)
+		? rule.metadata.failureReasons.map((reason) => String(reason).toLowerCase())
+		: []
+
+/**
+ * Whether unresolved conversations block the merge: a failed rule rollup that requires conversation resolution. A
+ * repository without that rule never blocks on its threads, however many are open.
+ */
+export function blocksOnUnresolvedComments(body: unknown) {
+	if (!openPullRequest(body) || !isRecord(body) || !isRecord(body.mergeRequirements)) return false
+
+	return records(body.mergeRequirements.conditions)
+		.flatMap((condition) => records(condition.ruleRollups))
+		.some(
+			(rule) =>
+				rule.result === 'FAILED' &&
+				(rule.ruleType === THREAD_RESOLUTION_RULE ||
+					failureReasons(rule).includes(THREAD_RESOLUTION_REASON)),
+		)
 }
 
 /** Whether the merge box offers the viewer "Rebase and merge" (`viewerMergeActions[].mergeMethods[]`). */
@@ -112,39 +144,44 @@ async function requestMergeBox({ owner, repo, number }: PullRequestRef, send: Se
 }
 
 /**
- * Asks the merge box with GitHub's default method, which decides conflicts. Only when that answer is clean and the
- * viewer may rebase does a second request ask for rebase merging, to tell a clean pull request from one GitHub
- * cannot rebase. `send` is fetch, or the list queue's, which throws RequestPausedError instead of sending while the
- * lists are paused, the second request included.
+ * Asks the merge box with GitHub's default method, which decides conflicts and unresolved conversations. Only when
+ * that answer is clean and the viewer may rebase does a second request ask for rebase merging, to tell a clean pull
+ * request from one GitHub cannot rebase. `send` is fetch, or the list queue's, which throws RequestPausedError
+ * instead of sending while the lists are paused, the second request included.
  */
 export async function fetchConflictState(
 	ref: PullRequestRef,
 	send: Send = fetch,
-): Promise<ConflictState> {
+): Promise<MergeBoxState> {
 	const body = await requestMergeBox(ref, send)
 	const state = parseMergeBox(body)
-	if (state !== 'clean' || !allowsRebase(body)) return state
+	const unresolved = blocksOnUnresolvedComments(body)
+	if (state !== 'clean' || !allowsRebase(body)) return { state, unresolved }
 
-	return parseMergeBox(await requestMergeBox(ref, send, REBASE_QUERY), 'rebase')
+	return {
+		state: parseMergeBox(await requestMergeBox(ref, send, REBASE_QUERY), 'rebase'),
+		unresolved,
+	}
 }
 
 export interface FetchConflictsRequest extends PullRequestRef {
 	type: typeof FETCH_CONFLICTS_MESSAGE
 }
 
-export type FetchConflictsResponse = { state: ConflictState } | ErrorResponse
+export type FetchConflictsResponse = MergeBoxState | ErrorResponse
 
 /** The content script's side: the service worker sends the merge box requests through the shared list queue. */
 export async function requestConflictState({
 	owner,
 	repo,
 	number,
-}: PullRequestRef): Promise<ConflictState> {
+}: PullRequestRef): Promise<MergeBoxState> {
 	const request: FetchConflictsRequest = { type: FETCH_CONFLICTS_MESSAGE, owner, repo, number }
 	const response = (await browser.runtime.sendMessage(request)) as
 		| FetchConflictsResponse
 		| undefined
-	if (response && 'state' in response) return response.state
+	if (response && 'state' in response)
+		return { state: response.state, unresolved: response.unresolved === true }
 	const status = statusOf(response)
 	if (status > 0) throw new MergeBoxUnavailableError(status)
 

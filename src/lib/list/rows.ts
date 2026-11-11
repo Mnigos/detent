@@ -6,18 +6,29 @@ export const CONFLICTS_ATTRIBUTE = 'data-detent-conflicts'
 export const CONFLICTS_TITLE = 'This branch has conflicts with the base branch'
 export const REBASE_BLOCKED_TITLE =
 	'This branch can be merged, but not rebased onto its base without conflicts'
+export const UNRESOLVED_ATTRIBUTE = 'data-detent-unresolved'
+export const UNRESOLVED_TITLE = 'Resolve all comments before this can merge'
 
 export type ConflictMarker = Extract<ConflictState, 'conflicts' | 'rebase-blocked'>
 
+type Marker = { text: string; title: string; className: string }
+
 // A merge conflict is red like GitHub's own; a blocked rebase only stops one merge method, so it takes the
 // attention tone GitHub gives a branch that needs a rebase.
-const MARKERS: Record<ConflictMarker, { text: string; title: string; className: string }> = {
+const MARKERS: Record<ConflictMarker, Marker> = {
 	conflicts: { text: 'Conflicts', title: CONFLICTS_TITLE, className: 'fgColor-danger' },
 	'rebase-blocked': {
 		text: "Can't rebase",
 		title: REBASE_BLOCKED_TITLE,
 		className: 'fgColor-attention',
 	},
+}
+
+// Unresolved conversations are for the author or reviewers to settle, not a broken branch, so the attention tone too.
+const UNRESOLVED: Marker = {
+	text: 'Unresolved comments',
+	title: UNRESOLVED_TITLE,
+	className: 'fgColor-attention',
 }
 
 export interface PullsListLocation {
@@ -109,7 +120,7 @@ const span = (text: string, className = '') => {
 
 // detent's elements trail the meta line in this order, behind the checks badge GitHub adds once it
 // loads, so every row reads alike.
-const TRAILING = [STATS_ATTRIBUTE, CONFLICTS_ATTRIBUTE]
+const TRAILING = [STATS_ATTRIBUTE, CONFLICTS_ATTRIBUTE, UNRESOLVED_ATTRIBUTE]
 
 function settle(meta: HTMLElement) {
 	const trailing = TRAILING.flatMap(
@@ -151,16 +162,27 @@ export function renderStats(meta: HTMLElement, key: string, stats: DiffStats): v
 }
 
 /** Marks a row whose branch conflicts with its base, or cannot be rebased onto it; a clean one has no marker. */
-export function renderConflicts(meta: HTMLElement, state: ConflictMarker): void {
-	const existing = meta.querySelector<HTMLElement>(`:scope > [${CONFLICTS_ATTRIBUTE}]`)
-	if (existing?.getAttribute(CONFLICTS_ATTRIBUTE) === state) {
+export const renderConflicts = (meta: HTMLElement, state: ConflictMarker) =>
+	renderMarker(meta, CONFLICTS_ATTRIBUTE, state, MARKERS[state])
+
+/** Marks a row whose unresolved conversations block the merge, after any conflict marker. */
+export const renderUnresolved = (meta: HTMLElement) =>
+	renderMarker(meta, UNRESOLVED_ATTRIBUTE, 'required', UNRESOLVED)
+
+function renderMarker(
+	meta: HTMLElement,
+	attribute: string,
+	value: string,
+	{ text, title, className }: Marker,
+): void {
+	const existing = meta.querySelector<HTMLElement>(`:scope > [${attribute}]`)
+	if (existing?.getAttribute(attribute) === value) {
 		settle(meta)
 		return
 	}
 
-	const { text, title, className } = MARKERS[state]
 	const element = document.createElement('span')
-	element.setAttribute(CONFLICTS_ATTRIBUTE, state)
+	element.setAttribute(attribute, value)
 	element.title = title
 	element.style.cssText = 'display:inline-flex;gap:4px;margin-left:4px;white-space:nowrap'
 	element.append(span('·'), span(text, className))
@@ -191,7 +213,11 @@ export function clearConflicts(meta: HTMLElement): void {
 	meta.querySelector(`:scope > [${CONFLICTS_ATTRIBUTE}]`)?.remove()
 }
 
+export function clearUnresolved(meta: HTMLElement): void {
+	meta.querySelector(`:scope > [${UNRESOLVED_ATTRIBUTE}]`)?.remove()
+}
+
 export function clearAllStats(root: ParentNode = document): void {
-	for (const element of root.querySelectorAll(`[${STATS_ATTRIBUTE}], [${CONFLICTS_ATTRIBUTE}]`))
+	for (const element of root.querySelectorAll(TRAILING.map((name) => `[${name}]`).join(', ')))
 		element.remove()
 }
