@@ -23,9 +23,26 @@ export interface ChatGptStatus {
 
 export type CallbackAnswer = { ok: true; email?: string } | { ok: false; message: string }
 
-/** The saved choice while the account still lists it, otherwise the first listed model. */
-export const pickModel = (saved: string, models: ChatGptModel[]) =>
-	models.some((model) => model.slug === saved) ? saved : (models[0]?.slug ?? saved)
+// Luna is fast and good enough for naming layers and ranking files; the account's first listed
+// model is often a heavier one that only adds latency here.
+const PREFERRED_MODEL = 'gpt-6-luna'
+const PREFERRED_FAMILY = 'luna'
+
+/**
+ * The saved choice while the account still lists it. Otherwise `gpt-6-luna`, then the first listed
+ * Luna (the server lists newer versions first), then the first listed model.
+ */
+export function pickModel(saved: string, models: ChatGptModel[]) {
+	const slugs = models.map((model) => model.slug)
+	if (slugs.includes(saved)) return saved
+
+	return (
+		slugs.find((slug) => slug === PREFERRED_MODEL) ??
+		slugs.find((slug) => slug.includes(PREFERRED_FAMILY)) ??
+		slugs[0] ??
+		saved
+	)
+}
 
 export const SIGNED_OUT: ChatGptStatus = { signedIn: false, models: [] }
 const UNREACHABLE: ChatGptStatus = {
