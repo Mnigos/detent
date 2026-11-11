@@ -53,7 +53,8 @@ export function App({
 	}
 
 	async function reset() {
-		await requestUsageReset(provider)
+		// The worker answers false when the counter could not be removed; the shown count then stays.
+		if ((await requestUsageReset(provider)) !== true) return
 		if (isChatGpt) setChatgptRequests(0)
 		else setUsage(EMPTY_USAGE)
 	}

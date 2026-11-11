@@ -131,6 +131,14 @@ describe('provider choice', () => {
 		expect(requestUsageReset).toHaveBeenCalledExactlyOnceWith('chatgpt')
 		expect(text()).toContain('Usage: 0 requests')
 	})
+
+	it('keeps the shown count when the worker could not reset it', async () => {
+		vi.mocked(requestUsageReset).mockResolvedValueOnce(false)
+		await render(CHATGPT, SIGNED_OUT, 4)
+		await click(button('reset'))
+
+		expect(text()).toContain('Usage: 4 requests')
+	})
 })
 
 describe('ChatGPT account', () => {
