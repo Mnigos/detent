@@ -58,8 +58,15 @@ beforeEach(() => {
 	sendMessage.mockClear()
 	vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(sendMessage as never)
 	answer = async () => ({ stats: stats(3) })
+	history.replaceState(null, '', '/o/r/pull/1')
 	document.body.innerHTML = reactHeader() + embeddedData(1, HEAD)
 })
+
+// A tab switch inside GitHub's app: a new URL, and the page data and header GitHub renders for it.
+function switchTab(path: string, headSha: string) {
+	history.pushState(null, '', path)
+	document.body.innerHTML = reactHeader() + embeddedData(1, headSha)
+}
 
 afterEach(() => {
 	view?.remove()
@@ -179,5 +186,57 @@ describe('pull request header code lines', () => {
 		await new Promise((done) => setTimeout(done, 20))
 		expect(statsRequests()).toHaveLength(1)
 		expect(markers()).toEqual([])
+	})
+
+	it('asks again a second later when the queue held the download for a pause this tab did not see', async () => {
+		let calls = 0
+		answer = async () => {
+			calls += 1
+			return calls === 1 ? { status: 0, isPaused: true } : { stats: stats(3) }
+		}
+		await mount()
+
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']), { timeout: 3000 })
+		expect(statsRequests()).toHaveLength(2)
+	})
+
+	it('loads again when a tab switch shows a newer head commit, and stores the counts for it', async () => {
+		await mount()
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']))
+		answer = async () => ({ stats: stats(5) })
+		switchTab('/o/r/pull/1/commits', OLD_HEAD)
+
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+5−1)']))
+		expect(statsRequests()).toHaveLength(2)
+		await vi.waitFor(async () =>
+			expect((await readStatsCache())['o/r/1']).toMatchObject({ headSha: OLD_HEAD }),
+		)
+	})
+
+	it('keeps the counts on a tab switch that shows the same head commit', async () => {
+		await mount()
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']))
+		switchTab('/o/r/pull/1/checks', HEAD)
+		await new Promise((done) => setTimeout(done, 50))
+
+		expect(markerText()).toEqual(['(+3−1)'])
+		expect(statsRequests()).toHaveLength(1)
+	})
+
+	it('tries a remembered failure again on a tab switch once it is stale', async () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => {})
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: { 'o/r/1': { failed: true, at: Date.now() - 1000, headSha: HEAD } },
+		})
+		const now = Date.now()
+		const clock = vi.spyOn(Date, 'now')
+		await mount()
+		await new Promise((done) => setTimeout(done, 20))
+		expect(statsRequests()).toEqual([])
+
+		clock.mockReturnValue(now + 11 * 60_000)
+		switchTab('/o/r/pull/1/commits', HEAD)
+		await vi.waitFor(() => expect(markerText()).toEqual(['(+3−1)']))
+		clock.mockRestore()
 	})
 })

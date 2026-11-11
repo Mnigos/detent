@@ -15,6 +15,8 @@ import { observeMutations } from '@/src/lib/panel/github-dom'
 import type { PullRequestLocation } from '@/src/lib/pull-request-url'
 
 const IDLE_TIMEOUT_MILLISECONDS = 2000
+/** How soon a download held back for a pause this tab did not see is asked again. */
+const HELD_RETRY_MILLISECONDS = 1000
 
 // Counting waits until the page has settled, so the header never competes with GitHub's own rendering.
 function whenIdle(): { promise: Promise<void>; cancel: () => void } {
@@ -42,19 +44,34 @@ export async function startHeaderStats(location: PullRequestLocation) {
 	const key = statsKey(location)
 	let resume = () => {}
 	const [cache, pause] = await Promise.all([readStatsCache(), createRateLimitPause(() => resume())])
-	const headSha = readHeadSha(location)
-	const cached = cache[key]
-	const isCached = isStatsFresh(cached, headSha)
-	let stats: DiffStats | undefined =
-		isCached && cached && !('failed' in cached) ? cached : undefined
-	let isDone = isCached
+	let headSha = readHeadSha(location)
+	// The counts, or a failure, for the head commit the page shows; undefined while they are still to load.
+	let entry: StatsEntry | undefined = isStatsFresh(cache[key], headSha) ? cache[key] : undefined
+	let href = window.location.href
 	let isLoading = false
 	let isStopped = false
 	let stop: (() => void) | undefined
 	const idle = new Set<() => void>()
+	const timers = new Set<ReturnType<typeof setTimeout>>()
+
+	// A tab switch may show a newer head commit, or come after a remembered failure ran out: either loads again.
+	function revalidate() {
+		if (window.location.href === href) return
+
+		href = window.location.href
+		const next = readHeadSha(location)
+		if (next && next !== headSha) {
+			headSha = next
+			entry = undefined
+		}
+		if (!isStatsFresh(entry, headSha)) void load()
+	}
 
 	const apply = () => {
-		if (!isStopped) renderHeaderCode(location, key, stats)
+		if (isStopped) return
+
+		revalidate()
+		renderHeaderCode(location, key, entry && !('failed' in entry) ? entry : undefined)
 	}
 
 	async function afterIdle() {
@@ -64,8 +81,8 @@ export async function startHeaderStats(location: PullRequestLocation) {
 		idle.delete(cancel)
 	}
 
-	async function count(): Promise<DiffStats> {
-		const page = recentPageDiff(location)
+	async function count(head: string | undefined): Promise<DiffStats> {
+		const page = recentPageDiff(location, head)
 		if (page) {
 			const text = await page.catch(() => undefined)
 			if (text !== undefined) {
@@ -77,19 +94,32 @@ export async function startHeaderStats(location: PullRequestLocation) {
 		return requestDiffStats(location)
 	}
 
+	function retryLater() {
+		const timer = setTimeout(() => {
+			timers.delete(timer)
+			void load()
+		}, HELD_RETRY_MILLISECONDS)
+		timers.add(timer)
+	}
+
 	async function load() {
-		if (isDone || isLoading || isStopped || pause.isPaused()) return
+		if (isLoading || isStopped || pause.isPaused() || isStatsFresh(entry, headSha)) return
 
 		isLoading = true
-		const head = headSha ? { headSha } : {}
-		let entry: StatsEntry
+		const requested = headSha
+		const head = requested ? { headSha: requested } : {}
+		let next: StatsEntry
 		try {
 			await afterIdle()
 			if (isStopped) return
-			entry = { ...(await count()), at: Date.now(), ...head }
+			next = { ...(await count(requested)), at: Date.now(), ...head }
 		} catch (error) {
-			// Held back by the pause, or rate-limited: nothing is cached and the pause's end loads again.
-			if (error instanceof PullRequestDiffError && error.isPaused) return
+			// Held back by a pause: the pause's end loads again, or, when this tab saw no pause (another tab's, or one
+			// that ended meanwhile), a retry in a second. A rate limit pauses the lists; nothing is cached either way.
+			if (error instanceof PullRequestDiffError && error.isPaused) {
+				if (!pause.isPaused()) retryLater()
+				return
+			}
 			if (
 				error instanceof PullRequestDiffError &&
 				(error.rateLimit || (error.status === 0 && pause.isThrottled()))
@@ -99,16 +129,18 @@ export async function startHeaderStats(location: PullRequestLocation) {
 			}
 
 			console.warn('[detent] header diff stats', key, error)
-			entry = { failed: true, at: Date.now(), ...head }
+			next = { failed: true, at: Date.now(), ...head }
 		} finally {
 			isLoading = false
 		}
 		if (isStopped) return
-
-		isDone = true
-		if (!('failed' in entry)) stats = entry
-		apply()
-		await writeStatsEntry(key, entry).catch((error: unknown) => console.warn('[detent]', error))
+		// The page moved to a newer head commit while these counts loaded: they are stored, not shown.
+		if (requested === headSha) {
+			entry = next
+			apply()
+		}
+		await writeStatsEntry(key, next).catch((error: unknown) => console.warn('[detent]', error))
+		if (requested !== headSha) void load()
 	}
 
 	resume = () => void load()
@@ -125,6 +157,8 @@ export async function startHeaderStats(location: PullRequestLocation) {
 			pause.stop()
 			for (const cancel of idle) cancel()
 			idle.clear()
+			for (const timer of timers) clearTimeout(timer)
+			timers.clear()
 			stop?.()
 			stop = undefined
 			clearHeaderCode()
