@@ -134,13 +134,13 @@ Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack
   to conflicts". Only when the first answer is clean and lists `REBASE` as `ALLOWED` or `ALLOWED_WITH_BYPASS` for the
   viewer does detent ask again with `merge_method=REBASE`. That second answer is read the same way, except that a
   failed conflict condition without conflicting files is **Can't rebase**; a failed merge method condition, an
-  error or an unusable body there is unknown, not clean. Both requests run in the same slot of the three-at-a-time
-  conflicts pool, and a refusal (401, 403, 404) of either counts as one.
+  error or an unusable body there is unknown, not clean. A refusal (401, 403, 404) of either counts as one.
 - Rate limits: a 429, or a 403 with `Retry-After`, `X-RateLimit-Remaining: 0` or "rate limit" in its body, on the
-  merge box or the `.diff` is not a refusal. GitHub's 429 may come without CORS headers, so the content script can
-  see only `TypeError: Failed to fetch`; during a pause, or within a minute of one GitHub's own answer started,
-  that counts as the limit too, so network errors alone never chain one pause onto the next. The rebase follow-up
-  request and the service worker's 5xx retries are not sent during a pause either.
+  merge box, the `.diff` or the list data is not a refusal. GitHub's 429 may come without CORS headers, so the
+  service worker can see only `TypeError: Failed to fetch`; during a pause, or within a minute of one GitHub's own
+  answer started, that counts as the limit too, so network errors alone never chain one pause onto the next. The
+  service worker checks the stored pause before each list request it starts, so the rebase follow-up, the 5xx
+  retries and requests other tabs queued earlier are not sent during a pause either.
   Both list pools then pause for every tab (`rateLimitedUntil` in `chrome.storage.local`) for `Retry-After`, or a
   minute, doubled for each repeat within ten minutes of the last pause, up to ten minutes. Nothing is cached for a
   rate-limited row; after the pause the list asks again only for rows still without fresh data.
@@ -157,10 +157,55 @@ Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack
   `merge_request_status`, `status_checks` under `page_data/` all answer 404. Other `page_data/` routes do answer
   signed out (`diffstat` 74 B, `tab_counts`, `timeline`, `description`, `labels`). `meta[name="user-login"]` is empty
   for a signed-out visitor, which is how detent skips the requests.
+- Drafts are not asked about since they are not ready to merge; a draft's earlier marker is not shown.
 - Not used: `api.github.com/repos/<o>/<r>/pulls/<n>` has `mergeable`/`mergeable_state` and sends
   `Access-Control-Allow-Origin: *`, but without a token it allows 60 requests an hour per IP (two list pages),
   answers 404 for a private repository because it does not take the github.com session, and returns
   `mergeable: null` until GitHub has computed it.
 - The list row's state icon is the leading `svg.octicon`: `octicon-git-pull-request` (aria-label "Open pull
   request"), `octicon-git-pull-request-draft` ("Draft pull request"), `-closed`, or `octicon-git-merge`. Only the first
-  two are asked about.
+  is asked about for conflicts; all four get diff stats.
+
+## Request cost of pull request lists
+
+Read by `src/lib/list/heads.ts`, `src/lib/list/request-queue.ts`, `src/lib/list/list-requests.ts` and
+`src/list/mount.ts`; observed 2026-11-11 on `TanStack/router/pulls`, signed out (the owner saw the same embedded data
+signed in). The owner hit GitHub 429s on a private organization list (about 18 open pull requests, two browser
+profiles, frequent reloads), which is why the list asks as little as below.
+
+- Head commits: the list page embeds its route data in
+  `<script type="application/json" data-target="react-app.embeddedData">` inside `<react-app app-name="repo">`,
+  at `payload.repoPullsDashboardContentRoute.results[]` (plus `currentPage`, `totalPages`, `totalCount`,
+  `openCount`, `closedCount`). Each result has `number`, `headSha` (40 hex), `createdAt`, `updatedAt`, `state`
+  (`REPO_PULL_REQUEST_STATE_OPEN`), `displayState` (`REPO_PULL_REQUEST_DISPLAY_STATE_OPEN` or `…_DRAFT`), `id`,
+  `globalId`, `repoNameWithOwner` (`TanStack/router`), `permalink`, `title` and `commitHeadShaChannel` (a live-update
+  channel, not the SHA). detent looks for objects with `number`, `headSha` and `repoNameWithOwner` anywhere in the
+  data and keys them `owner/repo/number`, lower-cased; `updatedAt` is kept but decides nothing.
+- The script still holds the first URL's data after GitHub navigates the list on the client (filters, pages), so its
+  head commits are dated to `performance.timeOrigin` and trusted for 10 minutes. When rows near the viewport have no
+  trusted head commit, detent asks once (at most every 10 minutes per URL) for the list URL with
+  `Accept: application/json`, `X-Requested-With: XMLHttpRequest` and `GitHub-Verified-Fetch: true`; GitHub answers
+  the same route JSON (`{"meta":…,"payload":{"repoPullsDashboardContentRoute":…}}`, about 30 KB for 25 rows), the
+  request its own client makes on navigation. Those rows wait for that answer; when it has nothing for them, they
+  fall back on the 10-minute stats cache.
+- Diff stats are stored with the head commit (`diffStats`, `headSha` field; entries without it, from older builds,
+  are read as before) and reused for 7 days while the row shows that commit. A failure is retried after 10 minutes.
+  Conflict states (`mergeConflicts:v3`) carry the head commit too: 10 minutes, or at once when the row shows another
+  commit. The base branch moving is not visible in the list data, hence the time limit.
+- Viewport: an IntersectionObserver with `rootMargin: "0px 0px 100% 0px"` on each row's `<li>`; only rows inside it
+  are queued, in page order, and a waiting row that leaves it is dropped until it comes back. Cached rows render
+  everywhere.
+- One queue: the service worker sends the diffs, merge boxes and list data of every tab, three at a time with at
+  least 150 ms between two starts, and shares one request among tabs asking for the same key. Each tab still runs
+  at most three diff and three merge box requests of its own. A service worker fetch to `github.com` with the host
+  permission sends the same cookies as the page, `SameSite=Strict` and `__Host-` ones included (checked 2026-11-11
+  in headless Chromium against a local server mapped to `github.com`); it differs only in `Sec-Fetch-Site: none`
+  instead of `same-origin`. GitHub answered `page_data/diffstat`, `page_data/tab_counts`, `page_data/merge_box` (404
+  signed out) and the list JSON identically for both. A signed-in `merge_box` answer from the service worker was not
+  checked; the pull request diff, fetched the same way, has always worked on private repositories.
+- Requests on the 25-row first page of `TanStack/router` in a 1400×600 window (11 rows near the viewport; stubbed
+  merge box, every third row conflicting, one in three unknown), from `tooling/list-conflicts-e2e.mjs`: first load 11
+  diffs and 11 merge box requests; scrolling to the end 14 diffs and 16 merge box requests more; opened again within
+  a minute 0 diffs and only the unknown rows near the viewport; opened again with every cache entry 15 minutes old
+  and no new commits 0 diffs, 11 merge box requests, 0 list data requests. The build before asked 25 diffs and 30
+  merge box requests on every load past the cache times (stats 10 minutes, conflicts 5), drafts included.

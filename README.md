@@ -13,12 +13,16 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
 - **Priority Review.** A third mode in the Changes page file tree (Layers | Priority | Files) ranks
   the files into Urgent (at most 10), High, Medium and Low.
 - **Diff size and conflicts on pull request lists.** Each row of `/<owner>/<repo>/pulls` shows
-  `+additions −deletions · N files`, counted from the pull request's diff and cached for 10 minutes,
-  and, when you are signed in, a red `Conflicts` marker on an open pull request whose branch
-  conflicts with its base, or an orange `Can't rebase` one when it merges but would not rebase
-  cleanly, read from GitHub's merge box and cached for 5 minutes. When GitHub rate-limits these
-  requests, the list waits as long as GitHub asks (a minute if it does not say, longer on repeats)
-  and then fills in the rows still missing.
+  `+additions −deletions · N files`, counted from the pull request's diff. The count is kept for the
+  head commit the list shows and reused for up to a week until a new commit is pushed (10 minutes
+  when the list does not say which commit it shows). When you are signed in, an open pull request
+  (not a draft) whose branch conflicts with its base gets a red `Conflicts` marker, or an orange
+  `Can't rebase` one when it merges but would not rebase cleanly, read from GitHub's merge box and
+  cached for 10 minutes or until a new commit is pushed. Only rows on screen or one screen below are
+  asked about; the rest are asked when you scroll to them. Every tab shares one queue of three
+  requests at a time, and a pull request two tabs ask about is fetched once. When GitHub
+  rate-limits these requests, the list waits as long as GitHub asks (a minute if it does not say,
+  longer on repeats) and then fills in the rows still missing.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
