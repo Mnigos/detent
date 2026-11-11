@@ -25,7 +25,7 @@ function addBadgeStyle() {
 	document.head.append(style)
 }
 
-// Without a key every layer is structural, which looks like a bad answer; say so where it is seen.
+// Without a provider every layer is structural, which looks like a bad answer; say so where it is seen.
 export function showKeyBadge(visible: boolean): void {
 	const existing = document.getElementById(KEY_BADGE_ID)
 	if (!visible) {
@@ -39,7 +39,7 @@ export function showKeyBadge(visible: boolean): void {
 	badge.setAttribute('role', 'status')
 	badge.style.cssText = KEY_BADGE_STYLE
 	badge.textContent =
-		'detent has no OpenRouter key, so the layers come from the file structure. Add a key in the extension popup and reload.'
+		'detent has no model provider set up, so the layers come from the file structure. Choose OpenRouter or ChatGPT in the extension popup and reload.'
 	document.body.append(badge)
 }
 

@@ -35,4 +35,32 @@ describe('statusLineFor', () => {
 			statusLineFor({ source: 'fallback', labeler: 'openrouter', model: 'openai/gpt-5.6-luna' }),
 		).toBe(STATUS_LINES.fallback)
 	})
+
+	it.each([
+		[
+			'unauthorized',
+			'Sign in to ChatGPT again in the extension popup; layer names come from the file structure.',
+		],
+		['limit', 'ChatGPT plan usage limit reached; layer names come from the file structure.'],
+		[
+			'unavailable',
+			'ChatGPT plan usage is unavailable right now; layer names come from the file structure.',
+		],
+		[
+			'ineligible',
+			'ChatGPT plan usage is not available for this account; layer names come from the file structure.',
+		],
+		['timeout', 'ChatGPT took too long; layer names come from the file structure.'],
+		['invalid', 'ChatGPT request failed; layer names come from the file structure.'],
+	] as const)('names ChatGPT for a %s error', (kind, line) => {
+		expect(
+			statusLineFor({ source: 'fallback', labeler: 'none', error: { kind, provider: 'chatgpt' } }),
+		).toBe(line)
+	})
+
+	it('shows a ChatGPT answer without a cost', () => {
+		expect(statusLineFor({ source: 'model', labeler: 'chatgpt', model: 'gpt-6-luna' })).toBe(
+			'Layer names from gpt-6-luna.',
+		)
+	})
 })

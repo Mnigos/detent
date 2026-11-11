@@ -20,7 +20,9 @@ vi.mock('./tree/mount', () => ({ startTree: vi.fn() }))
 vi.mock('./list/mount', () => ({ startListStats: vi.fn() }))
 
 const SETTINGS: Settings = {
+	provider: 'openrouter',
 	openRouterKey: '',
+	chatgptModel: '',
 	model: 'model',
 	isEnabled: true,
 	showListStats: true,

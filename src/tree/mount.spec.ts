@@ -125,9 +125,11 @@ describe('tree and diff integration', () => {
 		expect(window.scrollTo).not.toHaveBeenCalled()
 	})
 
-	it('shows an amber corner notice while there is no OpenRouter key', async () => {
+	it('shows an amber corner notice while there is no model provider', async () => {
 		store.dispatch({ type: 'labels', layers: LAYERS, status: STATUS_LINES.missingKey })
-		expect(document.getElementById('detent-no-key')?.textContent).toContain('no OpenRouter key')
+		expect(document.getElementById('detent-no-key')?.textContent).toContain(
+			'no model provider set up',
+		)
 		store.dispatch({ type: 'labels', layers: LAYERS, status: 'Layer names from m.' })
 		expect(document.getElementById('detent-no-key')).toBeNull()
 	})

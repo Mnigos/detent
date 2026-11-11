@@ -23,7 +23,9 @@ vi.mock('./header/mount', () => ({
 }))
 
 const SETTINGS: Settings = {
+	provider: 'openrouter',
 	openRouterKey: '',
+	chatgptModel: '',
 	model: 'model',
 	isEnabled: true,
 	showListStats: true,

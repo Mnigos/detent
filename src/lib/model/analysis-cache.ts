@@ -31,12 +31,12 @@ function readResponse(value: unknown): LabelLayersResponse | undefined {
 	if (!value || typeof value !== 'object') return undefined
 	const entry = value as Partial<LabelLayersResponse>
 	const grouping = toGroupingEntries(entry.grouping)
-	if (!grouping || entry.labeler !== 'openrouter') return undefined
+	if (!grouping || (entry.labeler !== 'openrouter' && entry.labeler !== 'chatgpt')) return undefined
 	return {
 		layers: [],
 		grouping,
 		source: 'model',
-		labeler: 'openrouter',
+		labeler: entry.labeler,
 		model: entry.model,
 		groupingChecked: entry.groupingChecked === true || undefined,
 		qualityWarning: entry.qualityWarning === true || undefined,
