@@ -43,6 +43,7 @@ const CONCURRENCY = 3
 // GitHub starts computing an unknown merge state on the first request; one later ask usually gets it.
 const UNKNOWN_RETRY_MILLISECONDS = 15_000
 const MAX_REFUSALS = 3
+const HELD_RETRY_MILLISECONDS = 1000
 
 /** A row to load; `headSha` is the head commit the list showed when it was queued, if known. */
 type Ref = { owner: string; repo: string; number: number; headSha?: string }
@@ -214,7 +215,16 @@ export async function startListStats() {
 			})
 			.finally(() => {
 				isAskingHeads = false
-				if (!isStopped && !isHeld) apply()
+				if (isStopped) return
+				if (!isHeld) return apply()
+				// Held for another tab's pause this tab may not have adopted yet, or for one that ended after the worker
+				// checked it: a paused tab applies again on resume, any other one tries again in a second.
+				if (pause.isPaused()) return
+				const timer = setTimeout(() => {
+					timers.delete(timer)
+					if (!isStopped) apply()
+				}, HELD_RETRY_MILLISECONDS)
+				timers.add(timer)
 			})
 
 		return true

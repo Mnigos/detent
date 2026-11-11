@@ -863,7 +863,7 @@ describe('list data during a rate limit pause', () => {
 		vi.useRealTimers()
 	})
 
-	it('waits for the resume when the worker holds the list data back for a pause this tab has not seen yet', async () => {
+	it('tries again a second later, not at once, when the worker holds the list data back and this tab is not paused', async () => {
 		renderList([{ number: 1 }], '')
 		const sendMessage = vi.mocked(fakeBrowser.runtime.sendMessage)
 		const answer = sendMessage.getMockImplementation()
@@ -876,8 +876,12 @@ describe('list data during a rate limit pause', () => {
 		}) as never)
 		await mount()
 		await new Promise((done) => setTimeout(done, 50))
-
 		expect(headsRequests).toEqual(['held'])
 		expect(diffCalls()).toEqual([])
+
+		// The pause ended after the worker checked it (or this tab never heard of it): the rows are not left waiting.
+		sendMessage.mockImplementation(answer as never)
+		await vi.waitFor(() => expect(diffCalls()).toEqual([1]), { timeout: 2000 })
+		expect(headsRequests).toEqual(['held', window.location.href])
 	})
 })
