@@ -39,6 +39,9 @@ base, or an orange Can't rebase one when it merges but would not rebase cleanly,
 orange Unresolved comments marker when the repository requires conversation resolution and open
 conversations block the merge (signed in to GitHub).
 
+Lines of code in the pull request header. On every tab of a pull request, GitHub's +additions −deletions
+is followed by the lines of code alone in parentheses, the same way, when part of the diff is not code.
+
 On the pull request page:
 
 - On the Changes page: the Layers | Priority | Files switch in GitHub's file tree, section headers
@@ -53,7 +56,8 @@ the steps, following a description that tells reviewers where to start, and rank
 Priority Review. Grouping and Priority Review are separate requests, each cached in the browser per
 pull request, model and diff revision, so switching models or pushing new commits asks again. Without a key the steps come from the file structure and the priorities
 from file paths and change sizes, computed locally. The popup shows what your requests cost so
-far, and has switches to turn detent off or to hide the list diff sizes and conflicts.
+far, and has switches to turn detent off or to hide the list diff sizes and conflicts and the
+header's lines of code.
 
 What leaves the browser: diffs are downloaded from GitHub with your GitHub session. Only when you
 saved an OpenRouter key, the title, description, changed file paths and diff excerpts of the pull
@@ -67,15 +71,16 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
 
 - **storage**: keeps the settings (OpenRouter key, model, two switches), cached step groupings
   and priority rankings per pull request revision, cached diff sizes and conflict states for pull
-  request lists, and a local usage counter in the browser. Session storage holds the review
+  request lists and headers, and a local usage counter in the browser. Session storage holds the review
   position of the open pull request.
 - **Host permission `https://github.com/*`**: the extension renders inside GitHub pull request
   pages and pull request lists. It matches the whole site because GitHub moves between pages by
   in-page navigation, where a script matched only on `/pull/` or `/pulls` URLs would never run. On
   other pages it only watches the URL. The service worker downloads each pull request's diff from
   `https://github.com/<owner>/<repo>/pull/<number>.diff`: for the open pull request to build the
-  steps, and for each pull request listed on a `/<owner>/<repo>/pulls` page to count its additions,
-  deletions, files and lines of code. On those lists the service worker also reads, with the user's
+  steps, for each pull request listed on a `/<owner>/<repo>/pulls` page to count its additions,
+  deletions, files and lines of code, and for the open pull request's header when those counts are
+  not stored yet. On those lists the service worker also reads, with the user's
   GitHub session, the merge box state GitHub's own page loads from
   `https://github.com/<owner>/<repo>/pull/<number>/page_data/merge_box`, to mark pull requests with
   merge conflicts, a blocked rebase or unresolved conversations that block the merge, and after

@@ -28,6 +28,12 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   three requests at a time, and a pull request two tabs ask about is fetched once. When GitHub
   rate-limits these requests, the list waits as long as GitHub asks (a minute if it does not say,
   longer on repeats) and then fills in the rows still missing.
+- **Lines of code in the pull request header.** On every tab of a pull request, GitHub's
+  `+additions −deletions` in the header is followed by the lines of code in parentheses, styled and
+  titled like the list's, and left out when nothing was excluded. The counts are the list's: reused
+  for the head commit the page shows, taken from the diff detent already downloaded on Files changed
+  or Changes, or downloaded once through the list queue and counted in the service worker, then
+  stored for the list too. Large pull requests get them as well; the click only gates grouping.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
@@ -36,7 +42,8 @@ pull request, model and diff revision. Without a key the steps come from the fil
 priorities from a local path and size heuristic. On a pull request with more than 300 changed files
 or 20,000 changed lines, detent waits until you click its corner badge before it fetches the diff,
 and remembers that click for the pull request until the browser session ends. The popup also holds
-two switches, one to turn detent off and one for the list diff sizes and conflicts, and a usage
+two switches, one to turn detent off and one for the list diff sizes and conflicts and the header's
+lines of code, and a usage
 counter. See
 `PRIVACY.md` for what leaves the browser and `docs/store/listing.md` for the Chrome Web Store
 material and release steps.

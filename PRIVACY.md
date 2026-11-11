@@ -3,8 +3,8 @@
 Last updated: 11 November 2026
 
 detent for GitHub is a browser extension that groups the files of a GitHub pull request into review
-steps, ranks them by review priority, and shows the diff size and merge conflicts of pull requests
-on pull request lists. This policy describes what the extension does with data. It applies to the extension
+steps, ranks them by review priority, shows the diff size and merge conflicts of pull requests
+on pull request lists, and the lines of code in a pull request's header. This policy describes what the extension does with data. It applies to the extension
 published in the Chrome Web Store and to builds from this repository.
 
 ## What the extension processes
@@ -22,13 +22,18 @@ published in the Chrome Web Store and to builds from this repository.
   from the data GitHub puts in the list page; after GitHub switches the list to another filter or
   page without reloading it, the extension asks `github.com` once for that page's list data, as
   GitHub's own list does. Nothing from the list goes to OpenRouter.
+- **Lines of code in the pull request header.** On every tab of a pull request, the extension shows
+  how many of the changed lines are code next to GitHub's own count. It reuses the counts stored for
+  the head commit the page shows, or the diff it already downloaded for the review steps; otherwise
+  it downloads the diff once the same way, in the same queue as the lists, and keeps only the counts,
+  stored with the lists' counts. The head commit comes from the data GitHub puts in the page.
 - **Merge conflicts on pull request lists.** On the same lists, when you are signed in to GitHub, the
   extension asks `github.com` for the merge box state of each open pull request (not drafts) on
   screen or one screen below, in the same queue, with your GitHub session, the request GitHub's own
   pull request page makes for its merge box. Only whether the branch has conflicts, or cannot be
   rebased, and whether unresolved conversations block the merge is kept, with the head commit it was
   read for. No comment or thread content is read. Signed out it asks nothing.
-  The "Show diff size and conflicts on pull request lists" switch in the popup turns both off.
+  The "Show diff size and conflicts on pull request lists, and code lines in pull request headers" switch in the popup turns these and the header's lines of code off.
 - **Model requests.** Only if you saved an OpenRouter API key in the popup, requests go directly
   from your browser to `openrouter.ai` with your key:
   - to name and order the review steps: the pull request title and description, a condensed list of
@@ -53,8 +58,8 @@ Everything the extension stores stays in your browser's extension storage:
 - cached Priority Review rankings, per pull request, model and diff revision (the last five
   revisions of each pull request),
 - whether the Hide tests switch is on,
-- diff sizes for pull request lists: owner, repository, pull request number, additions, deletions,
-  file count, the code line counts with what each excluded kind took, the head commit they were
+- diff sizes for pull request lists and headers: owner, repository, pull request number,
+  additions, deletions, file count, the code line counts with what each excluded kind took, the head commit they were
   counted for and the time they were counted, reused while the list shows that commit for up to 7
   days (10 minutes when the list does not say which commit it shows) and capped at 500 pull
   requests,
