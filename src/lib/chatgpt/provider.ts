@@ -5,6 +5,7 @@ import { recordChatGptRequest } from '../model/usage'
 import { PRIORITY_SCHEMA, parsePriorityResponse } from '../priority/schema'
 import type { Settings } from '../settings'
 import { clearNotice, readAccount, setNotice } from './account'
+import { pickModel } from './messages'
 import { listModels } from './models'
 import { respond, responsesRequest } from './responses'
 import { accessToken, invalidateAccessToken, SignInRequired } from './session'
@@ -46,7 +47,7 @@ async function ask<T>(
 	)
 	if (answer.isCharged) await recordChatGptRequest().catch(() => undefined)
 	const { error } = answer
-	if (error?.kind === 'unauthorized') await invalidateAccessToken(token)
+	if (error?.kind === 'unauthorized') invalidateAccessToken(token)
 	if (error?.kind === 'limit') {
 		pausedUntil = Date.now() + LIMIT_PAUSE_MILLISECONDS
 		await setNotice(LIMIT_NOTICE)
@@ -69,12 +70,10 @@ export async function chatGptProvider({
 }: Settings): Promise<ModelProvider | undefined> {
 	if (!(await readAccount())?.tokens) return undefined
 
-	const model =
-		chatgptModel ||
-		(await listModels()
-			.then((models) => models[0]?.slug)
-			.catch(() => undefined)) ||
-		''
+	// A saved model the account no longer lists falls back to the first one, as the popup shows it.
+	// Without the list (offline) the saved choice is used as it is.
+	const models = await listModels().catch(() => [])
+	const model = pickModel(chatgptModel, models)
 	return {
 		id: 'chatgpt',
 		model,

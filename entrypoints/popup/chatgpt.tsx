@@ -1,17 +1,18 @@
-import { useState } from 'react'
-import { type ChatGptStatus, chatGpt } from '@/src/lib/chatgpt/messages'
+import { use, useState } from 'react'
+import { type ChatGptStatus, chatGpt, pickModel } from '@/src/lib/chatgpt/messages'
 import { writeSettings } from '@/src/lib/settings'
 import { FIELD } from './styles'
 
 interface ChatGptAccountProps {
-	status: ChatGptStatus
+	/** Resolves when the worker answers; the section waits in a Suspense boundary meanwhile. */
+	status: Promise<ChatGptStatus>
 	/** The chosen model slug; empty means the first one the account lists. */
 	model: string
 	isLoading: boolean
 }
 
 export function ChatGptAccount({ status: initialStatus, model, isLoading }: ChatGptAccountProps) {
-	const [status, setStatus] = useState(initialStatus)
+	const [status, setStatus] = useState(use(initialStatus))
 	const [chosen, setChosen] = useState(model)
 	const [isBusy, setIsBusy] = useState(false)
 	const [error, setError] = useState('')
@@ -59,9 +60,7 @@ export function ChatGptAccount({ status: initialStatus, model, isLoading }: Chat
 			</div>
 		)
 
-	const selected = status.models.some((entry) => entry.slug === chosen)
-		? chosen
-		: (status.models[0]?.slug ?? '')
+	const selected = pickModel(chosen, status.models)
 	return (
 		<div className="flex flex-col gap-2">
 			<p className="text-neutral-300 text-xs">

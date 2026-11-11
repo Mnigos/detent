@@ -152,9 +152,19 @@ describe('accessToken', () => {
 
 	it('refreshes a token the API refused', async () => {
 		vaultStore.set('account', ACCOUNT)
-		await invalidateAccessToken('access-0')
+		invalidateAccessToken('access-0')
 
 		await expect(accessToken()).resolves.toBe('access-1')
+	})
+
+	it('marks a refused token without touching the stored record, so a sign-out stays signed out', async () => {
+		vaultStore.set('account', ACCOUNT)
+		const { tokens: _tokens, ...registration } = ACCOUNT
+		vaultStore.set('account', registration)
+		invalidateAccessToken('access-0')
+
+		expect(account()).toEqual(registration)
+		await expect(accessToken()).rejects.toThrow(SignInRequired)
 	})
 
 	it('does not bring tokens back when a sign-out lands during the refresh', async () => {

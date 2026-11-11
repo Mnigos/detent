@@ -221,6 +221,17 @@ describe('completeSignIn', () => {
 		await expect(completeSignIn(url)).resolves.toMatchObject({ ok: false })
 	})
 
+	it('redeems a code once even when two copies of the callback arrive together', async () => {
+		await beginSignIn()
+		const { state } = pending()
+		answerTokens()
+		const url = callback({ code: 'code-1', state, client_id: 'oaiapp_issued' })
+		const results = await Promise.all([completeSignIn(url), completeSignIn(url)])
+
+		expect(results.filter((result) => result.ok)).toHaveLength(1)
+		expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === TOKEN_URL)).toHaveLength(1)
+	})
+
 	it('keeps the issued client ID when the code is not accepted, and says so', async () => {
 		await beginSignIn()
 		const { state } = pending()

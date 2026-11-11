@@ -1,4 +1,4 @@
-import { ISSUER, JWKS_URL } from './account'
+import { ISSUER, JWKS_URL, REQUEST_TIMEOUT_MILLISECONDS } from './account'
 import { fromBase64url } from './pkce'
 
 const CLOCK_SKEW_SECONDS = 60
@@ -22,7 +22,7 @@ let signingKeys: Promise<SigningKey[]> | undefined
 
 function loadKeys(reload = false): Promise<SigningKey[]> {
 	if (reload || !signingKeys)
-		signingKeys = fetch(JWKS_URL)
+		signingKeys = fetch(JWKS_URL, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS) })
 			.then(async (response) => {
 				if (!response.ok) throw new Error(`HTTP ${response.status}`)
 				const body = (await response.json()) as { keys?: SigningKey[] }
