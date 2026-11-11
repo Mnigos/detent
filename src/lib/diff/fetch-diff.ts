@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser'
 import type { PullRequestLocation } from '../pull-request-url'
+import { type RateLimit, readRateLimit } from '../rate-limit'
 
 export const FETCH_DIFF_MESSAGE = 'detent:fetch-diff'
 
@@ -9,10 +10,14 @@ export interface FetchDiffRequest extends PullRequestRef {
 	type: typeof FETCH_DIFF_MESSAGE
 }
 
-export type FetchDiffResponse = { text: string } | { status: number }
+export type FetchDiffResponse = { text: string } | { status: number; rateLimit?: RateLimit }
 
+/** `rateLimit` is set when GitHub rate-limited the request rather than refused the pull request. */
 export class PullRequestDiffError extends Error {
-	constructor(readonly status: number) {
+	constructor(
+		readonly status: number,
+		readonly rateLimit?: RateLimit,
+	) {
 		super(`GitHub returned ${status} for the pull request diff`)
 		this.name = 'PullRequestDiffError'
 	}
@@ -43,6 +48,8 @@ export async function fetchPullRequestDiff({
 		})
 		if (response.ok) return response.text()
 
+		const rateLimit = await readRateLimit(response)
+		if (rateLimit) throw new PullRequestDiffError(response.status, rateLimit)
 		status = response.status
 		if (status < 500) break
 	}
@@ -60,5 +67,5 @@ export async function requestPullRequestDiff({
 	const response = (await browser.runtime.sendMessage(request)) as FetchDiffResponse | undefined
 	if (response && 'text' in response) return response.text
 
-	throw new PullRequestDiffError(response?.status ?? 0)
+	throw new PullRequestDiffError(response?.status ?? 0, response?.rateLimit)
 }

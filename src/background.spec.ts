@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { browser } from 'wxt/browser'
 import background from '../entrypoints/background'
-import { fetchPullRequestDiff } from './lib/diff/fetch-diff'
+import { fetchPullRequestDiff, PullRequestDiffError } from './lib/diff/fetch-diff'
 import { resolveLayerLabels } from './lib/model/label-layers'
 import { type PrioritizeResponse, resolvePriorities } from './lib/model/label-priorities'
 
@@ -14,7 +14,14 @@ vi.mock('wxt/browser', () => ({
 vi.mock('./lib/diff/fetch-diff', () => ({
 	FETCH_DIFF_MESSAGE: 'detent:fetch-diff',
 	fetchPullRequestDiff: vi.fn(),
-	PullRequestDiffError: class extends Error {},
+	PullRequestDiffError: class extends Error {
+		constructor(
+			readonly status: number,
+			readonly rateLimit?: object,
+		) {
+			super()
+		}
+	},
 }))
 vi.mock('./lib/model/label-layers', () => ({
 	LABEL_LAYERS_MESSAGE: 'detent:label-layers',
@@ -108,4 +115,29 @@ describe('background priorities message', () => {
 			expect(reply).not.toHaveBeenCalled()
 		},
 	)
+})
+
+describe('background diff message', () => {
+	const diffRequest = { type: 'detent:fetch-diff', owner: 'o', repo: 'r', number: 1 }
+
+	it('passes a rate limit back with the status', async () => {
+		vi.mocked(fetchPullRequestDiff).mockRejectedValue(
+			new PullRequestDiffError(429, { retryAfterMilliseconds: 60_000 }),
+		)
+		const reply = vi.fn()
+		expect(listener(diffRequest, {}, reply)).toBe(true)
+		await vi.waitFor(() =>
+			expect(reply).toHaveBeenCalledExactlyOnceWith({
+				status: 429,
+				rateLimit: { retryAfterMilliseconds: 60_000 },
+			}),
+		)
+	})
+
+	it('answers status 0 for an error that is not GitHub answering', async () => {
+		vi.mocked(fetchPullRequestDiff).mockRejectedValue(new TypeError('Failed to fetch'))
+		const reply = vi.fn()
+		expect(listener(diffRequest, {}, reply)).toBe(true)
+		await vi.waitFor(() => expect(reply).toHaveBeenCalledExactlyOnceWith({ status: 0 }))
+	})
 })

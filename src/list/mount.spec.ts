@@ -3,11 +3,20 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
-import { CONFLICTS_KEY, CONFLICTS_TTL_MILLISECONDS, readConflictsCache } from '@/src/lib/list/cache'
+import { PullRequestDiffError, requestPullRequestDiff } from '@/src/lib/diff/fetch-diff'
+import {
+	CONFLICTS_KEY,
+	CONFLICTS_TTL_MILLISECONDS,
+	readConflictsCache,
+	readStatsCache,
+	STATS_KEY,
+} from '@/src/lib/list/cache'
+import { RATE_LIMIT_KEY } from '@/src/lib/list/rate-limit'
 import { CONFLICTS_ATTRIBUTE, REBASE_BLOCKED_TITLE } from '@/src/lib/list/rows'
 import { startListStats } from './mount'
 
-vi.mock('@/src/lib/diff/fetch-diff', () => ({
+vi.mock('@/src/lib/diff/fetch-diff', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@/src/lib/diff/fetch-diff')>()),
 	requestPullRequestDiff: vi.fn(async () => ''),
 }))
 
@@ -48,9 +57,10 @@ const marked = () =>
 	)
 
 // Answers each pull request number with a mergeStateStatus, REBASE_BLOCKED (clean by default and rebase merging
-// offered, but the conflict condition fails when asked for rebase), or a status code.
-function stubMergeBox(states: Record<number, string | number>) {
+// offered, but the conflict condition fails when asked for rebase), or a status code. `delay` holds each answer back.
+function stubMergeBox(states: Record<number, string | number>, delay = 0) {
 	const fetch = vi.fn(async (url: string) => {
+		if (delay) await new Promise((done) => setTimeout(done, delay))
 		const number = Number(/\/pull\/(\d+)\//.exec(url)?.[1])
 		const state = states[number] ?? 'CLEAN'
 		if (typeof state === 'number') return new Response('', { status: state })
@@ -87,6 +97,7 @@ let view: Awaited<ReturnType<typeof startListStats>> | undefined
 
 beforeEach(() => {
 	fakeBrowser.reset()
+	vi.mocked(requestPullRequestDiff).mockReset()
 })
 
 afterEach(() => {
@@ -309,5 +320,202 @@ describe('list merge conflicts', () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+})
+
+const diffCalls = () =>
+	vi
+		.mocked(requestPullRequestDiff)
+		.mock.calls.map(([ref]) => ref.number)
+		.sort((a, b) => a - b)
+
+const rateLimit = (retryAfterMilliseconds?: number) =>
+	new PullRequestDiffError(
+		429,
+		retryAfterMilliseconds === undefined ? {} : { retryAfterMilliseconds },
+	)
+
+describe('list rate limits', () => {
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+		vi.spyOn(console, 'info').mockImplementation(() => undefined)
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+		vi.restoreAllMocks()
+	})
+
+	// Lets every settled request and storage write run through, without moving the clock.
+	async function settle() {
+		for (let round = 0; round < 20; round += 1) await vi.advanceTimersByTimeAsync(0)
+	}
+
+	it('pauses both pools for Retry-After, caches nothing for the limited row, then asks only for missing data', async () => {
+		renderList([1, 2, 3, 4, 5, 6].map((number) => ({ number })))
+		let isLimited = true
+		vi.mocked(requestPullRequestDiff).mockImplementation(async ({ number }) => {
+			if (number === 1 && isLimited) throw rateLimit(120_000)
+			return ''
+		})
+		const fetch = stubMergeBox({}, 1000)
+		await mount()
+		await settle()
+		await vi.advanceTimersByTimeAsync(1000)
+		await settle()
+
+		// The three requests of each pool already sent finish; nothing new goes out for the whole Retry-After.
+		await vi.advanceTimersByTimeAsync(117_000)
+		expect(diffCalls()).toEqual([1, 2, 3])
+		expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3])
+		const cached = await readStatsCache()
+		expect(cached['o/r/1']).toBeUndefined()
+		expect(Object.keys(cached).sort()).toEqual(['o/r/2', 'o/r/3'])
+
+		isLimited = false
+		await vi.advanceTimersByTimeAsync(2000)
+		await settle()
+		await vi.advanceTimersByTimeAsync(2000)
+		await settle()
+
+		expect(diffCalls()).toEqual([1, 1, 2, 3, 4, 5, 6])
+		expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3, 4, 5, 6])
+		await expect(readStatsCache()).resolves.toMatchObject({
+			'o/r/1': { additions: 0, deletions: 0 },
+		})
+	})
+
+	it('pauses a minute without Retry-After and doubles the pause when the limit repeats', async () => {
+		renderList([1, 2, 3, 4].map((number) => ({ number })))
+		const fetch = stubMergeBox({ 1: 429, 2: 429, 3: 429, 4: 429 })
+		await mount()
+		await settle()
+		expect(fetch).toHaveBeenCalledTimes(3)
+
+		await vi.advanceTimersByTimeAsync(59_000)
+		expect(fetch).toHaveBeenCalledTimes(3)
+		await vi.advanceTimersByTimeAsync(1000)
+		await settle()
+		expect(fetch).toHaveBeenCalledTimes(6)
+
+		await vi.advanceTimersByTimeAsync(119_000)
+		expect(fetch).toHaveBeenCalledTimes(6)
+		await vi.advanceTimersByTimeAsync(1000)
+		await settle()
+		// Nine 429s in all, and the list still asks: a rate limit is not a refusal.
+		expect(fetch).toHaveBeenCalledTimes(9)
+		await expect(readConflictsCache()).resolves.toEqual({})
+	})
+
+	it('counts a network error while throttled as the limit, not a refusal or an unknown state', async () => {
+		renderList([{ number: 1 }])
+		vi.mocked(requestPullRequestDiff).mockRejectedValueOnce(rateLimit(60_000)).mockResolvedValue('')
+		let failures = 2
+		const fetch = vi.fn(async (_url: string) => {
+			await new Promise((done) => setTimeout(done, 1000))
+			if (failures > 0) {
+				failures -= 1
+				throw new TypeError('Failed to fetch')
+			}
+			return Response.json({ pullRequest: { state: 'OPEN', mergeStateStatus: 'DIRTY' } })
+		})
+		vi.stubGlobal('fetch', fetch)
+		await mount()
+		await settle()
+		// Fails during the pause, and again a second after it, which repeats the limit: two minutes more.
+		await vi.advanceTimersByTimeAsync(61_000)
+		await settle()
+		expect(fetch).toHaveBeenCalledTimes(2)
+		await vi.advanceTimersByTimeAsync(118_000)
+		expect(fetch).toHaveBeenCalledTimes(2)
+
+		await vi.advanceTimersByTimeAsync(2000)
+		await settle()
+		await vi.advanceTimersByTimeAsync(1000)
+		await settle()
+		expect(fetch).toHaveBeenCalledTimes(3)
+		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
+	})
+
+	it("honours another tab's pause, stored before the list opens or written while it runs", async () => {
+		await fakeBrowser.storage.local.set({
+			[RATE_LIMIT_KEY]: { until: Date.now() + 90_000, strikes: 1 },
+		})
+		renderList([1, 2, 3, 4, 5, 6].map((number) => ({ number })))
+		const fetch = stubMergeBox({}, 1000)
+		await mount()
+		await settle()
+		await vi.advanceTimersByTimeAsync(89_000)
+		expect(diffCalls()).toEqual([])
+		expect(fetch).not.toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(1000)
+		await settle()
+		expect(fetch).toHaveBeenCalledTimes(3)
+		await vi.advanceTimersByTimeAsync(500)
+		await fakeBrowser.storage.local.set({
+			[RATE_LIMIT_KEY]: { until: Date.now() + 60_000, strikes: 1 },
+		})
+		await vi.advanceTimersByTimeAsync(59_000)
+		await settle()
+		expect(fetch).toHaveBeenCalledTimes(3)
+
+		await vi.advanceTimersByTimeAsync(1000)
+		await settle()
+		expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3, 4, 5, 6])
+	})
+})
+
+describe('list request cost', () => {
+	it('still caches a real failure for its ten minutes, without pausing the list', async () => {
+		renderList([1, 2, 3, 4].map((number) => ({ number })))
+		vi.mocked(requestPullRequestDiff).mockRejectedValue(new PullRequestDiffError(404))
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		const fetch = stubMergeBox({})
+		await mount()
+
+		await vi.waitFor(async () => expect(Object.keys(await readStatsCache())).toHaveLength(4))
+		await expect(readStatsCache()).resolves.toMatchObject({ 'o/r/1': { failed: true } })
+		await vi.waitFor(() => expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3, 4]))
+		await expect(fakeBrowser.storage.local.get(RATE_LIMIT_KEY)).resolves.toEqual({})
+		warn.mockRestore()
+	})
+
+	it('sends nothing for cached rows when the list is opened again within the cache times', async () => {
+		const rows = [
+			{ number: 1 },
+			{ number: 2 },
+			{ number: 3 },
+			{ number: 4, icon: 'octicon-git-merge' },
+		]
+		renderList(rows)
+		vi.mocked(requestPullRequestDiff).mockImplementation(async ({ number }) => {
+			if (number === 3) throw new PullRequestDiffError(404)
+			return ''
+		})
+		vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		const fetch = stubMergeBox({ 1: 'DIRTY', 2: 'REBASE_BLOCKED', 3: 'CLEAN' })
+		await mount()
+		await vi.waitFor(async () => {
+			expect(Object.keys(await readStatsCache())).toHaveLength(4)
+			expect(Object.keys(await readConflictsCache())).toHaveLength(3)
+		})
+		const stored = await fakeBrowser.storage.local.get([STATS_KEY, CONFLICTS_KEY])
+		view?.remove()
+		vi.mocked(requestPullRequestDiff).mockClear()
+		fetch.mockClear()
+
+		renderList(rows)
+		await mount()
+		await new Promise((done) => setTimeout(done, 50))
+
+		expect(diffCalls()).toEqual([])
+		expect(fetch).not.toHaveBeenCalled()
+		expect(markers().map(({ number, state }) => ({ number, state }))).toEqual([
+			{ number: 1, state: 'conflicts' },
+			{ number: 2, state: 'rebase-blocked' },
+		])
+		await expect(fakeBrowser.storage.local.get([STATS_KEY, CONFLICTS_KEY])).resolves.toEqual(stored)
+		vi.restoreAllMocks()
 	})
 })

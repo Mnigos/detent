@@ -52,6 +52,7 @@ Everything the extension stores stays in your browser's extension storage:
 - merge conflict states for pull request lists: owner, repository, pull request number, whether it
   has conflicts or cannot be rebased and when that was read, reused for 5 minutes and capped at 500
   pull requests,
+- when GitHub last rate-limited the list requests and until when they wait, so other tabs wait too,
 - a local counter of the tokens and cost your requests to OpenRouter reported.
 
 The extension has no server of its own. It sends nothing to the author or any analytics service.

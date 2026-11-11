@@ -7,6 +7,8 @@
 // isRebaseBlocked, CLEAN on the other rows that allow rebase, and a refused merge method (BLOCKED, as a repository
 // without rebase merging answers, with no word on the conflict) everywhere else. So both markers run on GitHub's
 // real list DOM, and a build that asked only for rebase would lose the conflicts on the squash-only rows.
+// Run 3 (simulated rate limit): as run 2, but the first three merge box requests answer 429 with Retry-After: 6. No
+// request may follow for those six seconds, and the markers must still all appear after the pause.
 // The real signed-in merge box answer is not covered; check it by hand in a signed-in browser.
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -31,6 +33,7 @@ const isRebaseBlocked = (number) =>
 // A clean default answer that offers rebase merging is asked once more, for rebase.
 const asksTwice = (number) => allowsRebase(number) && !isConflicting(number) && !isUnknown(number)
 const MERGE_BOX = /\/pull\/(\d+)\/page_data\/merge_box/
+const RETRY_AFTER_SECONDS = 6
 const DEFAULT_QUERY = ''
 const REBASE_QUERY = '?merge_method=REBASE&bypass_requirements=false'
 const methods = (number) => [
@@ -78,7 +81,7 @@ function answer(number, query) {
 	}
 }
 
-async function run(name, url, { signedIn }) {
+async function run(name, url, { signedIn, rateLimited = 0 }) {
 	const context = await chromium.launchPersistentContext(
 		mkdtempSync(join(tmpdir(), 'detent-e2e-')),
 		{
@@ -94,11 +97,16 @@ async function run(name, url, { signedIn }) {
 	const page = context.pages()[0] ?? (await context.newPage())
 	const asked = []
 	const requests = []
+	const started = Date.now()
 	page.on('request', (request) => {
 		const match = MERGE_BOX.exec(request.url())
 		if (!match) return
 		asked.push(Number(match[1]))
-		requests.push({ number: Number(match[1]), query: new URL(request.url()).search })
+		requests.push({
+			number: Number(match[1]),
+			query: new URL(request.url()).search,
+			at: Date.now() - started,
+		})
 	})
 	if (signedIn) {
 		await page.route(
@@ -112,7 +120,16 @@ async function run(name, url, { signedIn }) {
 				await route.fulfill({ response, body })
 			},
 		)
+		let limited = rateLimited
 		await page.route(MERGE_BOX, (route) => {
+			if (limited > 0) {
+				limited -= 1
+				return route.fulfill({
+					status: 429,
+					headers: { 'Retry-After': String(RETRY_AFTER_SECONDS) },
+					body: '',
+				})
+			}
 			const url = new URL(route.request().url())
 			const number = Number(MERGE_BOX.exec(url.pathname)?.[1])
 			return route.fulfill({ json: answer(number, url.search) })
@@ -128,7 +145,7 @@ async function run(name, url, { signedIn }) {
 			},
 		)
 		.catch(() => undefined)
-	await page.waitForTimeout(4000)
+	await page.waitForTimeout(rateLimited ? 4000 + RETRY_AFTER_SECONDS * 1000 : 4000)
 	const result = await page.evaluate(() => {
 		const rows = [...document.querySelectorAll('li a[data-testid="listitem-title-link"]')]
 		return rows.map((link) => {
@@ -183,9 +200,13 @@ const report = {
 report.runs.push(await run('signed-out', LIST, { signedIn: false }))
 report.runs.push(await run('simulated-sign-in', LIST, { signedIn: true }))
 report.runs.push(await run('simulated-sign-in-closed', CLOSED, { signedIn: true }))
+report.runs.push(await run('simulated-rate-limit', LIST, { signedIn: true, rateLimited: 3 }))
 writeFileSync(join(OUTPUT, 'report.json'), JSON.stringify(report, null, 2))
 
-const [signedOut, signedIn, closed] = report.runs
+const [signedOut, signedIn, closed, limited] = report.runs
+const limitedOpen = limited.rows.filter((row) =>
+	/^(Open|Draft) pull request$/.test(row.state ?? ''),
+)
 const openRows = signedIn.rows.filter((row) => /^(Open|Draft) pull request$/.test(row.state ?? ''))
 const checks = {
 	'signed out asks for no merge box': signedOut.asked.length === 0,
@@ -236,6 +257,18 @@ const checks = {
 	})(),
 	'closed list asks for nothing and marks nothing':
 		closed.asked.length === 0 && closed.marked.length === 0,
+	// The first three requests go out together and all answer 429; the next one waits out Retry-After.
+	'rate-limited list sends nothing more until Retry-After has passed': (() => {
+		const [first, , , next] = limited.requests
+		return Boolean(first && next) && next.at - first.at >= RETRY_AFTER_SECONDS * 1000 - 500
+	})(),
+	'rate-limited list asks again and marks the conflicting rows after the pause':
+		limitedOpen.length > 0 &&
+		JSON.stringify(limited.conflicting) ===
+			JSON.stringify(limitedOpen.map((row) => row.number).filter(isConflicting)) &&
+		JSON.stringify(limited.rebaseBlocked) ===
+			JSON.stringify(limitedOpen.map((row) => row.number).filter(isRebaseBlocked)),
+	'rate-limited list still shows diff stats': limited.rows.some((row) => row.stats),
 }
 console.log(
 	JSON.stringify(

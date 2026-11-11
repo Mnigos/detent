@@ -136,6 +136,12 @@ Read by `src/lib/list/conflicts.ts`; observed 2026-11-07 logged out on `TanStack
   failed conflict condition without conflicting files is **Can't rebase**; a failed merge method condition, an
   error or an unusable body there is unknown, not clean. Both requests run in the same slot of the three-at-a-time
   conflicts pool, and a refusal (401, 403, 404) of either counts as one.
+- Rate limits: a 429, or a 403 with `Retry-After`, `X-RateLimit-Remaining: 0` or "rate limit" in its body, on the
+  merge box or the `.diff` is not a refusal. GitHub's 429 may come without CORS headers, so the content script can
+  see only `TypeError: Failed to fetch`; during a pause, or within a minute of one, that counts as the limit too.
+  Both list pools then pause for every tab (`rateLimitedUntil` in `chrome.storage.local`) for `Retry-After`, or a
+  minute, doubled for each repeat within ten minutes of the last pause, up to ten minutes. Nothing is cached for a
+  rate-limited row; after the pause the list asks again only for rows still without fresh data.
 - Merge methods: `pullRequest.viewerMergeActions[]` (`name`: `DIRECT_MERGE`, `AUTO_MERGE`, `MERGE_QUEUE`) each carry
   `mergeMethods[]` of `{name: "MERGE"|"SQUASH"|"REBASE", allowableStatus}`. The merge button offers a method when
   its status is `ALLOWED` or `ALLOWED_WITH_BYPASS`; the update branch menu also lists `UNAVAILABLE` ones, greyed out

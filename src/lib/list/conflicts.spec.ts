@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { RateLimitError } from '../rate-limit'
 import {
 	allowsRebase,
 	fetchConflictState,
@@ -319,6 +320,23 @@ describe('fetchConflictState', () => {
 			url === REBASE_URL ? new Response('', { status: 403 }) : Response.json(clean),
 		)
 		await expect(fetchConflictState(ref)).rejects.toBeInstanceOf(MergeBoxUnavailableError)
+	})
+
+	it('throws a rate limit, not a refusal, for a 429 or a rate-limited 403', async () => {
+		vi.stubGlobal(
+			'fetch',
+			async () => new Response('', { status: 429, headers: { 'Retry-After': '90' } }),
+		)
+		await expect(fetchConflictState(ref)).rejects.toEqual(new RateLimitError(90_000))
+
+		vi.stubGlobal(
+			'fetch',
+			async () => new Response('You have exceeded a secondary rate limit.', { status: 403 }),
+		)
+		const error = await fetchConflictState(ref).catch((error: unknown) => error)
+		expect(error).toBeInstanceOf(RateLimitError)
+		expect(error).not.toBeInstanceOf(MergeBoxUnavailableError)
+		expect((error as RateLimitError).retryAfterMilliseconds).toBeUndefined()
 	})
 
 	it('answers unknown for a server error or a body that is not JSON', async () => {

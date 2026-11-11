@@ -1,4 +1,4 @@
-import { requestPullRequestDiff } from '@/src/lib/diff/fetch-diff'
+import { PullRequestDiffError, requestPullRequestDiff } from '@/src/lib/diff/fetch-diff'
 import {
 	CONFLICTS_TTL_MILLISECONDS,
 	type ConflictsCache,
@@ -18,6 +18,7 @@ import {
 	isSignedIn,
 	MergeBoxUnavailableError,
 } from '@/src/lib/list/conflicts'
+import { createRateLimitPause } from '@/src/lib/list/rate-limit'
 import {
 	clearAllStats,
 	clearConflicts,
@@ -28,6 +29,7 @@ import {
 } from '@/src/lib/list/rows'
 import { diffStats } from '@/src/lib/list/stats'
 import { observeMutations } from '@/src/lib/panel/github-dom'
+import { RateLimitError } from '@/src/lib/rate-limit'
 
 const CONCURRENCY = 3
 // GitHub starts computing an unknown merge state on the first request; one later ask usually gets it.
@@ -36,15 +38,18 @@ const MAX_REFUSALS = 3
 
 type Ref = { owner: string; repo: string; number: number }
 
-/** Runs at most `CONCURRENCY` loads at once and queues each key once until its load settles. */
-function createPool(load: (ref: Ref) => Promise<void>) {
+/**
+ * Runs at most `CONCURRENCY` loads at once and queues each key once until its load settles. While `isPaused`, queued
+ * loads wait and nothing new starts.
+ */
+function createPool(load: (ref: Ref) => Promise<void>, isPaused: () => boolean) {
 	const queue: Ref[] = []
 	const queued = new Set<string>()
 	let active = 0
 	let isStopped = false
 
 	function drain() {
-		while (!isStopped && active < CONCURRENCY && queue.length > 0) {
+		while (!isStopped && !isPaused() && active < CONCURRENCY && queue.length > 0) {
 			const ref = queue.shift() as Ref
 			active += 1
 			void load(ref).finally(() => {
@@ -80,9 +85,17 @@ function createPool(load: (ref: Ref) => Promise<void>) {
 }
 
 export async function startListStats() {
-	const [stats, conflicts]: [StatsCache, ConflictsCache] = await Promise.all([
+	const [stats, conflicts, pause]: [
+		StatsCache,
+		ConflictsCache,
+		Awaited<ReturnType<typeof createRateLimitPause>>,
+	] = await Promise.all([
 		readStatsCache(),
 		readConflictsCache(),
+		// After a rate limit, in this tab or another, the rows still missing data are asked again.
+		createRateLimitPause(() => {
+			if (!isStopped) apply()
+		}),
 	])
 	// Signed out GitHub serves no merge box, so a signed-out list asks for nothing.
 	let canAskConflicts = isSignedIn()
@@ -90,8 +103,8 @@ export async function startListStats() {
 	// Retry deadlines use the timer's monotonic clock, so a wall clock change cannot strand a row.
 	const unknownUntil = new Map<string, number>()
 	let refusals = 0
-	const statsPool = createPool(loadStats)
-	const conflictsPool = createPool(loadConflicts)
+	const statsPool = createPool(loadStats, () => pause.isPaused())
+	const conflictsPool = createPool(loadConflicts, () => pause.isPaused())
 	let isStopped = false
 	const timers = new Set<ReturnType<typeof setTimeout>>()
 
@@ -136,6 +149,14 @@ export async function startListStats() {
 		try {
 			entry = { ...diffStats(await requestPullRequestDiff(ref)), at: Date.now() }
 		} catch (error) {
+			// A rate limit says nothing about the pull request: nothing is cached and the row waits for the resume.
+			// The service worker reports a network error as status 0, which during a limit is the limit.
+			if (
+				error instanceof PullRequestDiffError &&
+				(error.rateLimit || (error.status === 0 && pause.isThrottled()))
+			)
+				return rateLimited(error.rateLimit?.retryAfterMilliseconds)
+
 			console.warn('[detent] diff stats', key, error)
 			entry = { failed: true, at: Date.now() }
 		}
@@ -151,6 +172,9 @@ export async function startListStats() {
 			state = await fetchConflictState(ref)
 			refusals = 0
 		} catch (error) {
+			// GitHub's 429 may come without CORS headers, so the content script sees only a network error.
+			if (error instanceof RateLimitError) return rateLimited(error.retryAfterMilliseconds)
+			if (error instanceof TypeError && pause.isThrottled()) return rateLimited()
 			// A 401, or refusals in a row, means signed out in another tab; one 403 or 404 may be a rate
 			// limit or a single pull request, so that row only waits for its retry.
 			if (error instanceof MergeBoxUnavailableError) {
@@ -173,6 +197,16 @@ export async function startListStats() {
 		conflicts[key] = entry
 		await writeConflictsEntry(key, entry).catch((error: unknown) => console.warn('[detent]', error))
 		if (!isStopped) apply()
+	}
+
+	// Neither pool sends anything until the pause is over; the pause then applies again, which queues only the rows
+	// still without fresh data.
+	function rateLimited(retryAfterMilliseconds?: number) {
+		const length = pause.signal(retryAfterMilliseconds)
+		if (length !== undefined)
+			console.info(
+				`[detent] GitHub rate limit, list requests pause for ${Math.ceil(length / 1000)} s`,
+			)
 	}
 
 	// Never cached: the row stays bare, asked once more after a while, then left alone on this page.
@@ -201,6 +235,7 @@ export async function startListStats() {
 			isStopped = true
 			statsPool.stop()
 			conflictsPool.stop()
+			pause.stop()
 			for (const timer of timers) clearTimeout(timer)
 			stop?.()
 			stop = undefined
