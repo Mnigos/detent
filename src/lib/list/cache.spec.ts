@@ -123,25 +123,30 @@ describe('storage', () => {
 			[CONFLICTS_KEY]: {
 				'o/r/1': { state: 'conflicts', at: 1 },
 				'o/r/3': { state: 'rebase-blocked', at: 3 },
+				'o/r/4': { state: 'conflicts', unresolved: true, at: 4 },
 				bad: { state: 'unknown', at: 1 },
+				badUnresolved: { state: 'clean', unresolved: 1, at: 1 },
 			},
 		})
-		await writeConflictsEntry('o/r/2', { state: 'clean', at: 2, headSha: SHA_A })
+		await writeConflictsEntry('o/r/2', { state: 'clean', unresolved: true, at: 2, headSha: SHA_A })
 
 		await expect(readConflictsCache()).resolves.toEqual({
 			'o/r/1': { state: 'conflicts', at: 1 },
-			'o/r/2': { state: 'clean', at: 2, headSha: SHA_A },
+			'o/r/2': { state: 'clean', unresolved: true, at: 2, headSha: SHA_A },
 			'o/r/3': { state: 'rebase-blocked', at: 3 },
+			'o/r/4': { state: 'conflicts', unresolved: true, at: 4 },
 		})
 		await expect(readStatsCache()).resolves.toEqual({})
 	})
 
 	it('keeps conflict states under a key of their own and ignores the entries of older builds', async () => {
-		expect(CONFLICTS_KEY).toBe('mergeConflicts:v3')
+		expect(CONFLICTS_KEY).toBe('mergeConflicts:v4')
 		await fakeBrowser.storage.local.set({
 			mergeConflicts: { 'o/r/1': { hasConflicts: true, at: 1 } },
 			// v2 asked only for rebase merging and stored "clean" for conflicts on repositories without it.
 			'mergeConflicts:v2': { 'o/r/3': { state: 'clean', at: Date.now() } },
+			// v3 did not look at conversation resolution, so its "clean" may hide unresolved comments.
+			'mergeConflicts:v3': { 'o/r/4': { state: 'clean', at: Date.now() } },
 			[CONFLICTS_KEY]: { 'o/r/2': { hasConflicts: true, at: 2 } },
 		})
 

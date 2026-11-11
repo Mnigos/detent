@@ -13,8 +13,8 @@ import {
 	writeStatsEntry,
 } from '@/src/lib/list/cache'
 import {
-	type ConflictState,
 	isSignedIn,
+	type MergeBoxState,
 	MergeBoxUnavailableError,
 	requestConflictState,
 } from '@/src/lib/list/conflicts'
@@ -29,10 +29,12 @@ import {
 	clearAllStats,
 	clearConflicts,
 	clearStats,
+	clearUnresolved,
 	findPullRows,
 	type PullRow,
 	renderConflicts,
 	renderStats,
+	renderUnresolved,
 } from '@/src/lib/list/rows'
 import { diffStats } from '@/src/lib/list/stats'
 import { watchViewport } from '@/src/lib/list/viewport'
@@ -167,6 +169,8 @@ export async function startListStats() {
 			if (isOpen && isFresh && conflict && conflict.state !== 'clean')
 				renderConflicts(row.meta, conflict.state)
 			else clearConflicts(row.meta)
+			if (isOpen && isFresh && conflict?.unresolved) renderUnresolved(row.meta)
+			else clearUnresolved(row.meta)
 			if (
 				canAskConflicts &&
 				canAsk &&
@@ -261,9 +265,9 @@ export async function startListStats() {
 
 	async function loadConflicts(ref: Ref) {
 		const key = statsKey(ref)
-		let state: ConflictState
+		let result: MergeBoxState
 		try {
-			state = await requestConflictState(ref)
+			result = await requestConflictState(ref)
 			refusals = 0
 		} catch (error) {
 			if (error instanceof RequestPausedError) return
@@ -280,8 +284,9 @@ export async function startListStats() {
 					return
 				}
 			} else console.warn('[detent] merge conflicts', key, error)
-			state = 'unknown'
+			result = { state: 'unknown', unresolved: false }
 		}
+		const { state, unresolved } = result
 		if (state === 'unknown') {
 			rememberUnknown(key)
 			return
@@ -290,6 +295,7 @@ export async function startListStats() {
 		unknownUntil.delete(key)
 		const entry: ConflictsEntry = {
 			state,
+			...(unresolved ? { unresolved } : {}),
 			at: Date.now(),
 			...(ref.headSha ? { headSha: ref.headSha } : {}),
 		}

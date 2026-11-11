@@ -7,12 +7,16 @@ import {
 	CONFLICTS_TITLE,
 	clearAllStats,
 	clearConflicts,
+	clearUnresolved,
 	findPullRows,
 	parsePullsListUrl,
 	REBASE_BLOCKED_TITLE,
 	renderConflicts,
 	renderStats,
+	renderUnresolved,
 	STATS_ATTRIBUTE,
+	UNRESOLVED_ATTRIBUTE,
+	UNRESOLVED_TITLE,
 } from './rows'
 import { CODE_TOOLTIP_HEADING, type DiffStats } from './stats'
 
@@ -249,5 +253,49 @@ describe('renderConflicts', () => {
 		renderStats(meta(), 'TanStack/router/8612', stats)
 		clearAllStats()
 		expect(document.querySelector(`[${CONFLICTS_ATTRIBUTE}], [${STATS_ATTRIBUTE}]`)).toBeNull()
+	})
+})
+
+describe('renderUnresolved', () => {
+	const meta = () => findPullRows()[0]?.meta as HTMLElement
+
+	it('appends one marker in the attention tone with what to do in its title', () => {
+		renderUnresolved(meta())
+		renderUnresolved(meta())
+
+		const markers = meta().querySelectorAll<HTMLElement>(`[${UNRESOLVED_ATTRIBUTE}]`)
+		expect(markers).toHaveLength(1)
+		expect(markers[0]?.title).toBe(UNRESOLVED_TITLE)
+		expect(markers[0]?.textContent).toBe('·Unresolved comments')
+		expect(markers[0]?.querySelector('.fgColor-attention')?.textContent).toBe('Unresolved comments')
+	})
+
+	it('trails the stats and the conflict marker, behind content GitHub appends later', () => {
+		renderUnresolved(meta())
+		renderConflicts(meta(), 'conflicts')
+		renderStats(meta(), 'TanStack/router/8612', plain(1, 1, 1))
+		const badge = document.createElement('span')
+		meta().append(badge)
+		renderConflicts(meta(), 'conflicts')
+
+		expect([...meta().children].slice(-4)).toEqual([
+			badge,
+			meta().querySelector(`[${STATS_ATTRIBUTE}]`),
+			meta().querySelector(`[${CONFLICTS_ATTRIBUTE}]`),
+			meta().querySelector(`[${UNRESOLVED_ATTRIBUTE}]`),
+		])
+	})
+
+	it('is removed by clearUnresolved and clearAllStats, and leaves the conflict marker alone', () => {
+		renderConflicts(meta(), 'rebase-blocked')
+		renderUnresolved(meta())
+		clearUnresolved(meta())
+		expect(meta().querySelector(`[${UNRESOLVED_ATTRIBUTE}]`)).toBeNull()
+		expect(meta().querySelector(`[${CONFLICTS_ATTRIBUTE}]`)).not.toBeNull()
+
+		renderUnresolved(meta())
+		clearAllStats()
+		expect(meta().querySelector(`[${UNRESOLVED_ATTRIBUTE}]`)).toBeNull()
+		expect(meta().querySelector(`[${CONFLICTS_ATTRIBUTE}]`)).toBeNull()
 	})
 })

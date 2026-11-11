@@ -63,7 +63,7 @@ export default defineBackground(() => {
 		if (isRequest<FetchConflictsRequest>(message, FETCH_CONFLICTS_MESSAGE)) {
 			list
 				.conflicts(message)
-				.then((state) => sendResponse({ state } satisfies FetchConflictsResponse))
+				.then((result) => sendResponse(result satisfies FetchConflictsResponse))
 				.catch((error: unknown) =>
 					sendResponse(errorResponse(error) satisfies FetchConflictsResponse),
 				)

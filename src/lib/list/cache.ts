@@ -11,7 +11,9 @@ export const STATS_TTL_MILLISECONDS = 10 * 60 * 1000
 export const STATS_HEAD_TTL_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
 // The version moves whenever the stored shape changes, so entries of an older build are not read. An optional field
 // that older builds ignore and newer ones can do without (headSha) is not such a change.
-export const CONFLICTS_KEY = 'mergeConflicts:v3'
+// v4 adds `unresolved`: a v3 entry was stored without looking at conversation resolution, so its "clean" says nothing
+// about it.
+export const CONFLICTS_KEY = 'mergeConflicts:v4'
 // Conflicts appear when the base branch moves, which the row does not show, so they are asked again after a while.
 export const CONFLICTS_TTL_MILLISECONDS = 10 * 60 * 1000
 export const STATS_CAP = 500
@@ -26,9 +28,13 @@ export type StatsEntry =
 
 export type StatsCache = Record<string, StatsEntry>
 
-/** Only a state GitHub finished computing is stored; "unknown" is never cached. */
+/**
+ * Only a state GitHub finished computing is stored; "unknown" is never cached. `unresolved`: unresolved conversations
+ * block the merge; stored only when they do.
+ */
 export interface ConflictsEntry {
 	state: Exclude<ConflictState, 'unknown'>
+	unresolved?: boolean
 	at: number
 	headSha?: string
 }
@@ -96,6 +102,7 @@ const isConflictsEntry = (value: unknown): value is ConflictsEntry =>
 	isRecord(value) &&
 	typeof value.at === 'number' &&
 	CONFLICT_STATES.has(value.state) &&
+	(value.unresolved === undefined || typeof value.unresolved === 'boolean') &&
 	hasHead(value)
 
 /** Keeps the newest `cap` entries. */

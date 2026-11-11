@@ -180,7 +180,10 @@ describe('background list messages', () => {
 	it('answers a merge box request with its state, or with what stopped it', async () => {
 		const request = { type: 'detent:fetch-conflicts', ...ref }
 		for (const [outcome, expected] of [
-			[() => Promise.resolve('conflicts'), { state: 'conflicts' }],
+			[
+				() => Promise.resolve({ state: 'conflicts', unresolved: true }),
+				{ state: 'conflicts', unresolved: true },
+			],
 			[() => Promise.reject(new RequestPausedError()), { status: 0, isPaused: true }],
 			[
 				() => Promise.reject(new RateLimitError(30_000)),
