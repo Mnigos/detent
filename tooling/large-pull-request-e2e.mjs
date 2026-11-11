@@ -261,7 +261,9 @@ async function suite(tab) {
 					!initial.loading &&
 					!initial.panel &&
 					!initial.tree &&
-					requests.length === 0 &&
+					// The header's code lines download the diff once, counted in the service worker; the gate only
+					// holds back grouping.
+					requests.length <= 1 &&
 					responsive.pass &&
 					filter.pass !== false,
 			}
