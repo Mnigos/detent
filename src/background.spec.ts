@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { browser } from 'wxt/browser'
 import background from '../entrypoints/background'
 import { fetchPullRequestDiff, PullRequestDiffError } from './lib/diff/fetch-diff'
+import { MergeBoxUnavailableError } from './lib/list/conflicts'
 import { resolveLayerLabels } from './lib/model/label-layers'
 import { type PrioritizeResponse, resolvePriorities } from './lib/model/label-priorities'
+import { RateLimitError, RequestPausedError } from './lib/rate-limit'
 
 vi.mock('wxt/browser', () => ({
 	browser: {
@@ -24,6 +26,8 @@ vi.mock('./lib/diff/fetch-diff', () => ({
 		}
 	},
 }))
+const list = vi.hoisted(() => ({ diff: vi.fn(), conflicts: vi.fn(), heads: vi.fn() }))
+vi.mock('./lib/list/list-requests', () => ({ createListRequests: () => list }))
 vi.mock('./lib/model/label-layers', () => ({
 	LABEL_LAYERS_MESSAGE: 'detent:label-layers',
 	resolveLayerLabels: vi.fn(),
@@ -141,5 +145,72 @@ describe('background diff message', () => {
 		const reply = vi.fn()
 		expect(listener(diffRequest, {}, reply)).toBe(true)
 		await vi.waitFor(() => expect(reply).toHaveBeenCalledExactlyOnceWith({ status: 0 }))
+	})
+})
+
+describe('background list messages', () => {
+	const ref = { owner: 'o', repo: 'r', number: 1 }
+
+	it("sends a list's diff through the shared list queue and the panel's straight to GitHub", async () => {
+		list.diff.mockResolvedValue('list diff')
+		vi.mocked(fetchPullRequestDiff).mockResolvedValue('panel diff')
+		const listReply = vi.fn()
+		const panelReply = vi.fn()
+		expect(listener({ type: 'detent:fetch-diff', ...ref, isList: true }, {}, listReply)).toBe(true)
+		expect(listener({ type: 'detent:fetch-diff', ...ref }, {}, panelReply)).toBe(true)
+
+		await vi.waitFor(() => expect(listReply).toHaveBeenCalledExactlyOnceWith({ text: 'list diff' }))
+		await vi.waitFor(() =>
+			expect(panelReply).toHaveBeenCalledExactlyOnceWith({ text: 'panel diff' }),
+		)
+		expect(list.diff).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ref))
+		expect(fetchPullRequestDiff).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ref))
+	})
+
+	it('answers a merge box request with its state, or with what stopped it', async () => {
+		const request = { type: 'detent:fetch-conflicts', ...ref }
+		for (const [outcome, expected] of [
+			[() => Promise.resolve('conflicts'), { state: 'conflicts' }],
+			[() => Promise.reject(new RequestPausedError()), { status: 0, isPaused: true }],
+			[
+				() => Promise.reject(new RateLimitError(30_000)),
+				{ status: 429, isRateLimited: true, retryAfterMilliseconds: 30_000 },
+			],
+			[() => Promise.reject(new MergeBoxUnavailableError(404)), { status: 404 }],
+			[() => Promise.reject(new TypeError('Failed to fetch')), { status: 0 }],
+		] as const) {
+			list.conflicts.mockImplementationOnce(outcome)
+			const reply = vi.fn()
+			expect(listener(request, {}, reply)).toBe(true)
+			await vi.waitFor(() => expect(reply).toHaveBeenCalledExactlyOnceWith(expected))
+		}
+	})
+
+	it("answers only a pull request list's own data", async () => {
+		list.heads.mockResolvedValue(new Map([['o/r/1', { headSha: 'a'.repeat(40), at: 1 }]]))
+		const reply = vi.fn()
+		expect(
+			listener(
+				{ type: 'detent:fetch-list-heads', url: 'https://github.com/o/r/pulls?q=is%3Aopen' },
+				{},
+				reply,
+			),
+		).toBe(true)
+		await vi.waitFor(() =>
+			expect(reply).toHaveBeenCalledExactlyOnceWith({
+				heads: [['o/r/1', { headSha: 'a'.repeat(40), at: 1 }]],
+			}),
+		)
+
+		const refused = vi.fn()
+		expect(
+			listener(
+				{ type: 'detent:fetch-list-heads', url: 'https://evil.example/o/r/pulls' },
+				{},
+				refused,
+			),
+		).toBe(false)
+		expect(refused).toHaveBeenCalledExactlyOnceWith({ status: 0 })
+		expect(list.heads).toHaveBeenCalledOnce()
 	})
 })

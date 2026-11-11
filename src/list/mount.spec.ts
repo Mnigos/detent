@@ -11,8 +11,13 @@ import {
 	readStatsCache,
 	STATS_KEY,
 } from '@/src/lib/list/cache'
+import { FETCH_CONFLICTS_MESSAGE } from '@/src/lib/list/conflicts'
+import { FETCH_LIST_HEADS_MESSAGE, type PullHead } from '@/src/lib/list/heads'
+import { createListRequests } from '@/src/lib/list/list-requests'
 import { RATE_LIMIT_KEY } from '@/src/lib/list/rate-limit'
+import { createRequestQueue } from '@/src/lib/list/request-queue'
 import { CONFLICTS_ATTRIBUTE, REBASE_BLOCKED_TITLE } from '@/src/lib/list/rows'
+import { errorResponse } from '@/src/lib/rate-limit'
 import { startListStats } from './mount'
 
 vi.mock('@/src/lib/diff/fetch-diff', async (importOriginal) => ({
@@ -94,10 +99,38 @@ const mergeBoxCalls = (fetch: { mock: { calls: [string, ...unknown[]][] } }) =>
 	fetch.mock.calls.map(([url]) => Number(/\/pull\/(\d+)\//.exec(url)?.[1])).sort((a, b) => a - b)
 
 let view: Awaited<ReturnType<typeof startListStats>> | undefined
+// What the service worker answers for the list data of a page; empty unless a test gives head commits.
+let listHeads: [string, PullHead][] = []
+const headsRequests: string[] = []
+
+// The service worker's side of the list messages, run in place: the real list requests over a queue without the gap,
+// so merge box requests reach the stubbed fetch and a stored pause holds them as it would in the worker.
+function stubServiceWorker() {
+	const list = createListRequests(createRequestQueue({ gapMilliseconds: 0 }))
+	vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation((async (message: {
+		type: string
+		url: string
+		owner: string
+		repo: string
+		number: number
+	}) => {
+		if (message.type === FETCH_LIST_HEADS_MESSAGE) {
+			headsRequests.push(message.url)
+			return { heads: listHeads }
+		}
+		if (message.type === FETCH_CONFLICTS_MESSAGE)
+			return list.conflicts(message).then((state) => ({ state }), errorResponse)
+
+		return undefined
+	}) as never)
+}
 
 beforeEach(() => {
 	fakeBrowser.reset()
 	vi.mocked(requestPullRequestDiff).mockReset()
+	listHeads = []
+	headsRequests.length = 0
+	stubServiceWorker()
 })
 
 afterEach(() => {
@@ -112,7 +145,7 @@ async function mount() {
 }
 
 describe('list merge conflicts', () => {
-	it('marks only open rows GitHub reports as conflicting, and caches only computed states', async () => {
+	it('marks only open rows GitHub reports as conflicting, skips drafts, and caches only computed states', async () => {
 		renderList([
 			{ number: 1 },
 			{ number: 2 },
@@ -120,12 +153,12 @@ describe('list merge conflicts', () => {
 			{ number: 4, icon: 'octicon-git-pull-request-closed' },
 			{ number: 5, icon: 'octicon-git-merge' },
 		])
-		const fetch = stubMergeBox({ 1: 'DIRTY', 2: 'CLEAN', 3: 'UNKNOWN' })
+		const fetch = stubMergeBox({ 1: 'DIRTY', 2: 'CLEAN', 3: 'DIRTY' })
 		await mount()
 
 		await vi.waitFor(async () => expect(Object.keys(await readConflictsCache())).toHaveLength(2))
 		await vi.waitFor(() => expect(marked()).toEqual(['https://github.com/o/r/pull/1']))
-		expect(mergeBoxCalls(fetch)).toEqual([1, 2, 3])
+		expect(mergeBoxCalls(fetch)).toEqual([1, 2])
 		await expect(readConflictsCache()).resolves.toMatchObject({
 			'o/r/1': { state: 'conflicts' },
 			'o/r/2': { state: 'clean' },
@@ -208,7 +241,7 @@ describe('list merge conflicts', () => {
 		expect(fetch.mock.calls.length).toBeLessThanOrEqual(3)
 	})
 
-	it('reuses a state for five minutes and asks again after', async () => {
+	it('reuses a state for ten minutes and asks again after', async () => {
 		const now = Date.now()
 		await fakeBrowser.storage.local.set({
 			[CONFLICTS_KEY]: {
@@ -595,5 +628,256 @@ describe('list request cost', () => {
 		])
 		await expect(fakeBrowser.storage.local.get([STATS_KEY, CONFLICTS_KEY])).resolves.toEqual(stored)
 		vi.restoreAllMocks()
+	})
+})
+
+const sha = (character: string) => character.repeat(40)
+const MINUTE = 60 * 1000
+
+// The list data GitHub embeds in the page, hand-written in the shape of the list route's payload.
+function embedHeads(heads: Record<number, string>) {
+	const script = document.createElement('script')
+	script.type = 'application/json'
+	script.dataset.target = 'react-app.embeddedData'
+	script.textContent = JSON.stringify({
+		payload: {
+			repoPullsDashboardContentRoute: {
+				results: Object.entries(heads).map(([number, headSha]) => ({
+					number: Number(number),
+					headSha,
+					repoNameWithOwner: 'o/r',
+					updatedAt: '2026-11-10T18:50:00Z',
+					displayState: 'REPO_PULL_REQUEST_DISPLAY_STATE_OPEN',
+				})),
+			},
+		},
+	})
+	document.body.append(script)
+}
+
+describe('list stats by head commit', () => {
+	it('reuses stats counted for the head commit the list shows, long past ten minutes', async () => {
+		const at = Date.now() - 3 * 24 * 60 * MINUTE
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: {
+				'o/r/1': { additions: 5, deletions: 1, files: 2, at, headSha: sha('a') },
+				'o/r/2': { additions: 7, deletions: 0, files: 1, at, headSha: sha('b') },
+			},
+		})
+		renderList([{ number: 1 }, { number: 2 }], '')
+		embedHeads({ 1: sha('a'), 2: sha('c') })
+		await mount()
+		await vi.waitFor(async () => expect((await readStatsCache())['o/r/2']?.headSha).toBe(sha('c')))
+
+		// Row 2 has a new head commit, so only its diff is asked for, and the new count is stored with that commit.
+		expect(diffCalls()).toEqual([2])
+		expect(headsRequests).toEqual([])
+		await expect(readStatsCache()).resolves.toMatchObject({
+			'o/r/1': { additions: 5, at, headSha: sha('a') },
+			'o/r/2': { additions: 0, headSha: sha('c') },
+		})
+	})
+
+	it('keeps the ten minutes for a row the list data does not cover', async () => {
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: {
+				'o/r/1': { additions: 5, deletions: 1, files: 2, at: Date.now() - 11 * MINUTE },
+				'o/r/2': { additions: 5, deletions: 1, files: 2, at: Date.now() - MINUTE },
+			},
+		})
+		renderList([{ number: 1 }, { number: 2 }], '')
+		await mount()
+		await vi.waitFor(() => expect(diffCalls()).toEqual([1]))
+		await new Promise((done) => setTimeout(done, 20))
+
+		// Without data in the page, the list asked once for the page's data, which did not know the rows either.
+		expect(headsRequests).toEqual([window.location.href])
+		expect(diffCalls()).toEqual([1])
+	})
+
+	it('asks once for the list data after a navigation, and lets rows wait for it instead of their diffs', async () => {
+		const at = Date.now() - 60 * MINUTE
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: {
+				'o/r/1': { additions: 5, deletions: 1, files: 2, at, headSha: sha('a') },
+				'o/r/2': { additions: 5, deletions: 1, files: 2, at, headSha: sha('b') },
+			},
+		})
+		listHeads = [
+			['o/r/1', { headSha: sha('a'), at: Date.now() }],
+			['o/r/2', { headSha: sha('b'), at: Date.now() }],
+		]
+		renderList([{ number: 1 }, { number: 2 }], '')
+		await mount()
+		await vi.waitFor(() => expect(headsRequests).toHaveLength(1))
+		await new Promise((done) => setTimeout(done, 20))
+
+		expect(diffCalls()).toEqual([])
+		expect(document.querySelectorAll('[data-detent-diff-stats]')).toHaveLength(2)
+	})
+})
+
+describe('list conflicts by head commit', () => {
+	it('asks again at once when the row shows another head commit than the state was read for', async () => {
+		const at = Date.now() - MINUTE
+		await fakeBrowser.storage.local.set({
+			[CONFLICTS_KEY]: {
+				'o/r/1': { state: 'conflicts', at, headSha: sha('a') },
+				'o/r/2': { state: 'conflicts', at, headSha: sha('b') },
+			},
+		})
+		renderList([{ number: 1 }, { number: 2 }])
+		embedHeads({ 1: sha('a'), 2: sha('c') })
+		const fetch = stubMergeBox({ 2: 'CLEAN' })
+		await mount()
+
+		// The stale marker of row 2 is not shown while it is asked again.
+		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
+		await vi.waitFor(async () =>
+			expect((await readConflictsCache())['o/r/2']).toMatchObject({
+				state: 'clean',
+				headSha: sha('c'),
+			}),
+		)
+		expect(mergeBoxCalls(fetch)).toEqual([2])
+		expect(marked()).toEqual(['https://github.com/o/r/pull/1'])
+	})
+})
+
+// A controllable IntersectionObserver: `show` reports elements entering or leaving the observed area.
+function stubIntersectionObserver() {
+	const observers: {
+		callback: IntersectionObserverCallback
+		targets: Set<Element>
+		options?: IntersectionObserverInit
+	}[] = []
+	class FakeObserver {
+		private readonly record
+		constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+			this.record = { callback, targets: new Set<Element>(), options }
+			observers.push(this.record)
+		}
+		observe(target: Element) {
+			this.record.targets.add(target)
+		}
+		unobserve(target: Element) {
+			this.record.targets.delete(target)
+		}
+		disconnect() {
+			this.record.targets.clear()
+		}
+	}
+	vi.stubGlobal('IntersectionObserver', FakeObserver)
+
+	return {
+		observers,
+		show(elements: Element[], isIntersecting = true) {
+			for (const record of observers) {
+				const entries = elements
+					.filter((element) => record.targets.has(element))
+					.map((target) => ({ target, isIntersecting }) as IntersectionObserverEntry)
+				if (entries.length > 0) record.callback(entries, record as unknown as IntersectionObserver)
+			}
+		},
+	}
+}
+
+describe('list rows near the viewport', () => {
+	const items = () => [...document.querySelectorAll('li')]
+
+	it('asks only about rows on screen or one screen below, in their order, and the others once scrolled to', async () => {
+		const viewport = stubIntersectionObserver()
+		renderList([1, 2, 3, 4, 5, 6].map((number) => ({ number })))
+		const fetch = stubMergeBox({})
+		await mount()
+		await new Promise((done) => setTimeout(done, 20))
+		expect(diffCalls()).toEqual([])
+		expect(fetch).not.toHaveBeenCalled()
+		expect(viewport.observers[0]?.options?.rootMargin).toBe('0px 0px 100% 0px')
+
+		viewport.show(items().slice(0, 2))
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+		expect(vi.mocked(requestPullRequestDiff).mock.calls.map(([{ number }]) => number)).toEqual([
+			1, 2,
+		])
+
+		viewport.show(items().slice(4))
+		viewport.show(items().slice(2, 4))
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(6))
+		expect(vi.mocked(requestPullRequestDiff).mock.calls.map(([{ number }]) => number)).toEqual([
+			1, 2, 5, 6, 3, 4,
+		])
+	})
+
+	it('shows cached data on every row, near the viewport or not', async () => {
+		stubIntersectionObserver()
+		const at = Date.now()
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: { 'o/r/3': { additions: 1, deletions: 1, files: 1, at } },
+			[CONFLICTS_KEY]: { 'o/r/3': { state: 'conflicts', at } },
+		})
+		renderList([1, 2, 3].map((number) => ({ number })))
+		const fetch = stubMergeBox({})
+		await mount()
+
+		expect(document.querySelectorAll('[data-detent-diff-stats]')).toHaveLength(1)
+		expect(marked()).toEqual(['https://github.com/o/r/pull/3'])
+		expect(fetch).not.toHaveBeenCalled()
+	})
+
+	it('drops a waiting request for a row scrolled away before its turn', async () => {
+		const viewport = stubIntersectionObserver()
+		renderList([1, 2, 3, 4, 5].map((number) => ({ number })))
+		const pending: (() => void)[] = []
+		vi.mocked(requestPullRequestDiff).mockImplementation(
+			() => new Promise((done) => pending.push(() => done(''))),
+		)
+		stubMergeBox({})
+		await mount()
+
+		viewport.show(items())
+		await vi.waitFor(() => expect(diffCalls()).toEqual([1, 2, 3]))
+		viewport.show(items().slice(3), false)
+		for (const resolve of pending.splice(0)) resolve()
+		await new Promise((done) => setTimeout(done, 20))
+
+		expect(diffCalls()).toEqual([1, 2, 3])
+	})
+})
+
+describe('list data during a rate limit pause', () => {
+	it('does not ask for the list data while paused, and asks once the pause is over', async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+		await fakeBrowser.storage.local.set({
+			[RATE_LIMIT_KEY]: { until: Date.now() + 60_000, strikes: 1 },
+		})
+		renderList([{ number: 1 }], '')
+		await mount()
+		for (let round = 0; round < 20; round += 1) await vi.advanceTimersByTimeAsync(0)
+		expect(headsRequests).toEqual([])
+
+		await vi.advanceTimersByTimeAsync(60_000)
+		for (let round = 0; round < 20; round += 1) await vi.advanceTimersByTimeAsync(0)
+		expect(headsRequests).toHaveLength(1)
+		expect(diffCalls()).toEqual([1])
+		vi.useRealTimers()
+	})
+
+	it('waits for the resume when the worker holds the list data back for a pause this tab has not seen yet', async () => {
+		renderList([{ number: 1 }], '')
+		const sendMessage = vi.mocked(fakeBrowser.runtime.sendMessage)
+		const answer = sendMessage.getMockImplementation()
+		sendMessage.mockImplementation((async (message: { type: string }) => {
+			if (message.type === FETCH_LIST_HEADS_MESSAGE) {
+				headsRequests.push('held')
+				return { status: 0, isPaused: true }
+			}
+			return (answer as ((message: unknown) => unknown) | undefined)?.(message)
+		}) as never)
+		await mount()
+		await new Promise((done) => setTimeout(done, 50))
+
+		expect(headsRequests).toEqual(['held'])
+		expect(diffCalls()).toEqual([])
 	})
 })

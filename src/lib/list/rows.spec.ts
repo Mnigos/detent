@@ -59,6 +59,16 @@ describe('findPullRows', () => {
 			expect(findPullRows()[0]?.isOpen).toBe(isOpen)
 		}
 	})
+
+	it('marks only a draft row as a draft, and keeps its <li>', () => {
+		const icon = document.querySelector('svg.octicon') as SVGElement
+		icon.setAttribute('class', 'octicon octicon-git-pull-request')
+		expect(findPullRows()[0]?.isDraft).toBe(false)
+		expect(findPullRows()[0]?.item).toBe(document.querySelector('li'))
+
+		icon.setAttribute('class', 'octicon octicon-git-pull-request-draft')
+		expect(findPullRows()[0]).toMatchObject({ isOpen: true, isDraft: true })
+	})
 })
 
 describe('renderStats', () => {

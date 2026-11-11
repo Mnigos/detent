@@ -1,4 +1,8 @@
-import { RateLimitError, RequestPausedError, readRateLimit } from '../rate-limit'
+import { browser } from 'wxt/browser'
+import { type ErrorResponse, RateLimitError, readRateLimit, statusOf } from '../rate-limit'
+import type { Send } from './request-queue'
+
+export const FETCH_CONFLICTS_MESSAGE = 'detent:fetch-conflicts'
 
 /** `rebase-blocked`: a merge commit or squash would go through, "Rebase and merge" would not. */
 export type ConflictState = 'conflicts' | 'rebase-blocked' | 'clean' | 'unknown'
@@ -82,14 +86,15 @@ export const isSignedIn = (root: ParentNode = document) =>
 // rebase on a repository that does not allow it, the merge method condition fails and the conflict can go unsaid.
 const REBASE_QUERY = '?merge_method=REBASE&bypass_requirements=false'
 
-// Same origin as the list, so the content script sends the session cookie without the service worker.
+// The service worker asks with the session cookie: the extension's host permission for github.com makes Chrome send
+// the same cookies, SameSite=Strict ones included, as the list page's own requests.
 // Resolves to undefined for an answer that is not usable JSON. A rate limit throws RateLimitError, so it is never
 // taken for a refusal.
-async function requestMergeBox({ owner, repo, number }: PullRequestRef, query = '') {
-	const response = await fetch(
+async function requestMergeBox({ owner, repo, number }: PullRequestRef, send: Send, query = '') {
+	const response = await send(
 		`https://github.com/${owner}/${repo}/pull/${number}/page_data/merge_box${query}`,
 		{
-			credentials: 'same-origin',
+			credentials: 'include',
 			headers: {
 				Accept: 'application/json',
 				'X-Requested-With': 'XMLHttpRequest',
@@ -109,17 +114,40 @@ async function requestMergeBox({ owner, repo, number }: PullRequestRef, query = 
 /**
  * Asks the merge box with GitHub's default method, which decides conflicts. Only when that answer is clean and the
  * viewer may rebase does a second request ask for rebase merging, to tell a clean pull request from one GitHub
- * cannot rebase. When `isPaused` turns true in between, that request is not sent and the call throws
- * RequestPausedError.
+ * cannot rebase. `send` is fetch, or the list queue's, which throws RequestPausedError instead of sending while the
+ * lists are paused, the second request included.
  */
 export async function fetchConflictState(
 	ref: PullRequestRef,
-	isPaused: () => boolean = () => false,
+	send: Send = fetch,
 ): Promise<ConflictState> {
-	const body = await requestMergeBox(ref)
+	const body = await requestMergeBox(ref, send)
 	const state = parseMergeBox(body)
 	if (state !== 'clean' || !allowsRebase(body)) return state
-	if (isPaused()) throw new RequestPausedError()
 
-	return parseMergeBox(await requestMergeBox(ref, REBASE_QUERY), 'rebase')
+	return parseMergeBox(await requestMergeBox(ref, send, REBASE_QUERY), 'rebase')
+}
+
+export interface FetchConflictsRequest extends PullRequestRef {
+	type: typeof FETCH_CONFLICTS_MESSAGE
+}
+
+export type FetchConflictsResponse = { state: ConflictState } | ErrorResponse
+
+/** The content script's side: the service worker sends the merge box requests through the shared list queue. */
+export async function requestConflictState({
+	owner,
+	repo,
+	number,
+}: PullRequestRef): Promise<ConflictState> {
+	const request: FetchConflictsRequest = { type: FETCH_CONFLICTS_MESSAGE, owner, repo, number }
+	const response = (await browser.runtime.sendMessage(request)) as
+		| FetchConflictsResponse
+		| undefined
+	if (response && 'state' in response) return response.state
+	const status = statusOf(response)
+	if (status > 0) throw new MergeBoxUnavailableError(status)
+
+	// The service worker's fetch failed, as the content script's own would on a network error.
+	throw new TypeError('The merge box request failed')
 }

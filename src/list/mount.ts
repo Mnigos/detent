@@ -1,9 +1,9 @@
 import { PullRequestDiffError, requestPullRequestDiff } from '@/src/lib/diff/fetch-diff'
 import {
-	CONFLICTS_TTL_MILLISECONDS,
 	type ConflictsCache,
 	type ConflictsEntry,
-	isFresh,
+	isConflictFresh,
+	isStatsFresh,
 	readConflictsCache,
 	readStatsCache,
 	type StatsCache,
@@ -14,20 +14,28 @@ import {
 } from '@/src/lib/list/cache'
 import {
 	type ConflictState,
-	fetchConflictState,
 	isSignedIn,
 	MergeBoxUnavailableError,
+	requestConflictState,
 } from '@/src/lib/list/conflicts'
+import {
+	HEADS_TTL_MILLISECONDS,
+	headKey,
+	readEmbeddedHeads,
+	requestListHeads,
+} from '@/src/lib/list/heads'
 import { createRateLimitPause } from '@/src/lib/list/rate-limit'
 import {
 	clearAllStats,
 	clearConflicts,
 	clearStats,
 	findPullRows,
+	type PullRow,
 	renderConflicts,
 	renderStats,
 } from '@/src/lib/list/rows'
 import { diffStats } from '@/src/lib/list/stats'
+import { watchViewport } from '@/src/lib/list/viewport'
 import { observeMutations } from '@/src/lib/panel/github-dom'
 import { RateLimitError, RequestPausedError } from '@/src/lib/rate-limit'
 
@@ -36,7 +44,8 @@ const CONCURRENCY = 3
 const UNKNOWN_RETRY_MILLISECONDS = 15_000
 const MAX_REFUSALS = 3
 
-type Ref = { owner: string; repo: string; number: number }
+/** A row to load; `headSha` is the head commit the list showed when it was queued, if known. */
+type Ref = { owner: string; repo: string; number: number; headSha?: string }
 
 /**
  * Runs at most `CONCURRENCY` loads at once and queues each key once until its load settles. While `isPaused`, queued
@@ -111,32 +120,57 @@ export async function startListStats() {
 		if (!isStopped) apply()
 	}
 
+	// Head commits from the list data GitHub embedded in the page, joined by the data asked for after navigations.
+	const heads = readEmbeddedHeads()
+	// List URL → when its data was last asked for, so a page whose data does not help is asked at most every 10 min.
+	const headsAskedAt = new Map<string, number>()
+	let isAskingHeads = false
+	const viewport = watchViewport(() => {
+		if (!isStopped) apply()
+	})
+
+	const headOf = (row: PullRow, now: number) => {
+		const head = heads.get(headKey(row))
+
+		return head && now - head.at < HEADS_TTL_MILLISECONDS ? head.headSha : undefined
+	}
+
 	// Every pass walks the rows on the page: rows React re-rendered get their stats back, new rows
-	// (pagination, a changed filter) get theirs, and stale or missing ones are queued once.
+	// (pagination, a changed filter) get theirs, and stale or missing ones near the viewport are queued once, in the
+	// order they appear. Cached data shows on every row, wherever it is.
 	function apply() {
 		const now = Date.now()
 		const rows = findPullRows()
-		const keys = new Set(rows.map(statsKey))
-		statsPool.retain(keys)
-		conflictsPool.retain(keys)
+		viewport.watch(rows.map((row) => row.item))
+		const near = rows.filter((row) => viewport.isNear(row.item))
+		const nearKeys = new Set(near.map(statsKey))
+		statsPool.retain(nearKeys)
+		conflictsPool.retain(nearKeys)
+		// Rows without a known head commit wait while the list data is asked for, so they need not fall back on
+		// the short cache time.
+		const isWaitingForHeads = askHeads(near, now)
 		for (const row of rows) {
 			const key = statsKey(row)
-			const ref = { owner: row.owner, repo: row.repo, number: row.number }
+			const headSha = headOf(row, now)
+			const ref: Ref = { owner: row.owner, repo: row.repo, number: row.number, headSha }
+			const canAsk = nearKeys.has(key) && (headSha !== undefined || !isWaitingForHeads)
 			const entry = stats[key]
 			if (entry && !('failed' in entry)) renderStats(row.meta, key, entry)
 			else clearStats(row.meta)
-			if (!isFresh(entry) && !statsPool.has(key)) statsPool.push(ref)
+			if (canAsk && !isStatsFresh(entry, headSha, now) && !statsPool.has(key)) statsPool.push(ref)
 
-			// A stale state is as good as unknown: the base may have moved since.
+			// A stale state is as good as unknown: the base may have moved since. Drafts are not ready to merge.
 			const conflict = conflicts[key]
-			const isConflictFresh = isFresh(conflict, now, CONFLICTS_TTL_MILLISECONDS)
-			if (row.isOpen && isConflictFresh && conflict && conflict.state !== 'clean')
+			const isOpen = row.isOpen && !row.isDraft
+			const isFresh = isConflictFresh(conflict, headSha, now)
+			if (isOpen && isFresh && conflict && conflict.state !== 'clean')
 				renderConflicts(row.meta, conflict.state)
 			else clearConflicts(row.meta)
 			if (
 				canAskConflicts &&
-				row.isOpen &&
-				!isConflictFresh &&
+				canAsk &&
+				isOpen &&
+				!isFresh &&
 				performance.now() >= (unknownUntil.get(key) ?? 0) &&
 				!conflictsPool.has(key)
 			)
@@ -146,11 +180,56 @@ export async function startListStats() {
 		conflictsPool.drain()
 	}
 
+	// Asks once for the list data of the page when rows near the viewport have no known head commit, as after
+	// GitHub's own navigation to another filter or page. Returns whether such a request is running.
+	function askHeads(near: PullRow[], now: number) {
+		if (isAskingHeads) return true
+		if (near.every((row) => headOf(row, now) !== undefined)) return false
+		// Nothing goes out during a pause; the rows wait for its end, which applies again.
+		if (pause.isPaused()) return true
+		const url = window.location.href.split('#')[0] as string
+		if (now - (headsAskedAt.get(url) ?? Number.NEGATIVE_INFINITY) < HEADS_TTL_MILLISECONDS)
+			return false
+
+		headsAskedAt.set(url, now)
+		isAskingHeads = true
+		let isHeld = false
+		requestListHeads(url)
+			.then((fetched) => {
+				for (const [key, head] of fetched) heads.set(key, head)
+			})
+			.catch((error: unknown) => {
+				// Neither held back nor rate-limited data says anything: the resume asks again. A request held back
+				// for another tab's pause does not apply at once, which would only ask again before this tab adopts it.
+				if (error instanceof RequestPausedError) {
+					headsAskedAt.delete(url)
+					isHeld = true
+				} else if (error instanceof RateLimitError) {
+					headsAskedAt.delete(url)
+					rateLimited(error.retryAfterMilliseconds)
+				} else if (error instanceof TypeError && pause.isThrottled()) {
+					headsAskedAt.delete(url)
+					rateLimited(undefined, true)
+				} else console.warn('[detent] list data', error)
+			})
+			.finally(() => {
+				isAskingHeads = false
+				if (!isStopped && !isHeld) apply()
+			})
+
+		return true
+	}
+
 	async function loadStats(ref: Ref) {
 		const key = statsKey(ref)
+		const head = ref.headSha ? { headSha: ref.headSha } : {}
 		let entry: StatsEntry
 		try {
-			entry = { ...diffStats(await requestPullRequestDiff(ref, { isList: true })), at: Date.now() }
+			entry = {
+				...diffStats(await requestPullRequestDiff(ref, { isList: true })),
+				at: Date.now(),
+				...head,
+			}
 		} catch (error) {
 			// Held back by the pause: the resume asks again.
 			if (error instanceof PullRequestDiffError && error.isPaused) return
@@ -163,7 +242,7 @@ export async function startListStats() {
 				return rateLimited(error.rateLimit?.retryAfterMilliseconds, !error.rateLimit)
 
 			console.warn('[detent] diff stats', key, error)
-			entry = { failed: true, at: Date.now() }
+			entry = { failed: true, at: Date.now(), ...head }
 		}
 		stats[key] = entry
 		await writeStatsEntry(key, entry).catch((error: unknown) => console.warn('[detent]', error))
@@ -174,11 +253,11 @@ export async function startListStats() {
 		const key = statsKey(ref)
 		let state: ConflictState
 		try {
-			state = await fetchConflictState(ref, () => pause.isPaused())
+			state = await requestConflictState(ref)
 			refusals = 0
 		} catch (error) {
 			if (error instanceof RequestPausedError) return
-			// GitHub's 429 may come without CORS headers, so the content script sees only a network error.
+			// GitHub's 429 may come without CORS headers, so the service worker sees only a network error.
 			if (error instanceof RateLimitError) return rateLimited(error.retryAfterMilliseconds)
 			if (error instanceof TypeError && pause.isThrottled()) return rateLimited(undefined, true)
 			// A 401, or refusals in a row, means signed out in another tab; one 403 or 404 may be a rate
@@ -199,7 +278,11 @@ export async function startListStats() {
 		}
 
 		unknownUntil.delete(key)
-		const entry: ConflictsEntry = { state, at: Date.now() }
+		const entry: ConflictsEntry = {
+			state,
+			at: Date.now(),
+			...(ref.headSha ? { headSha: ref.headSha } : {}),
+		}
 		conflicts[key] = entry
 		await writeConflictsEntry(key, entry).catch((error: unknown) => console.warn('[detent]', error))
 		if (!isStopped) apply()
@@ -242,6 +325,7 @@ export async function startListStats() {
 			statsPool.stop()
 			conflictsPool.stop()
 			pause.stop()
+			viewport.stop()
 			for (const timer of timers) clearTimeout(timer)
 			stop?.()
 			stop = undefined

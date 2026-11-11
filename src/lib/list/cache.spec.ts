@@ -4,9 +4,12 @@ import {
 	CONFLICTS_KEY,
 	CONFLICTS_TTL_MILLISECONDS,
 	evictOldest,
+	isConflictFresh,
 	isFresh,
+	isStatsFresh,
 	readConflictsCache,
 	readStatsCache,
+	STATS_HEAD_TTL_MILLISECONDS,
 	STATS_KEY,
 	STATS_TTL_MILLISECONDS,
 	type StatsCache,
@@ -27,13 +30,54 @@ describe('isFresh', () => {
 		expect(isFresh({ failed: true, at: 0 }, 1)).toBe(true)
 		expect(isFresh(undefined, 0)).toBe(false)
 	})
+})
 
-	it('keeps a conflict state for five minutes only', () => {
+const SHA_A = 'a'.repeat(40)
+const SHA_B = 'b'.repeat(40)
+
+describe('isStatsFresh', () => {
+	it('reuses stats counted for the head commit the row shows for a week, however old', () => {
+		const counted = { ...entry(0), headSha: SHA_A }
+
+		expect(STATS_HEAD_TTL_MILLISECONDS).toBe(7 * 24 * 60 * 60 * 1000)
+		expect(isStatsFresh(counted, SHA_A, STATS_TTL_MILLISECONDS * 10)).toBe(true)
+		expect(isStatsFresh(counted, SHA_A, STATS_HEAD_TTL_MILLISECONDS - 1)).toBe(true)
+		expect(isStatsFresh(counted, SHA_A, STATS_HEAD_TTL_MILLISECONDS)).toBe(false)
+	})
+
+	it('treats stats of another head commit as stale at once', () => {
+		expect(isStatsFresh({ ...entry(0), headSha: SHA_A }, SHA_B, 1)).toBe(false)
+	})
+
+	it('falls back on ten minutes when either side has no head commit, and for a failure', () => {
+		for (const [stored, headSha] of [
+			[entry(0), SHA_A],
+			[{ ...entry(0), headSha: SHA_A }, undefined],
+			[{ failed: true as const, at: 0, headSha: SHA_A }, SHA_A],
+		] as const) {
+			expect(isStatsFresh(stored, headSha, STATS_TTL_MILLISECONDS - 1)).toBe(true)
+			expect(isStatsFresh(stored, headSha, STATS_TTL_MILLISECONDS)).toBe(false)
+		}
+		expect(isStatsFresh(undefined, SHA_A, 0)).toBe(false)
+	})
+})
+
+describe('isConflictFresh', () => {
+	it('keeps a conflict state for ten minutes', () => {
 		const conflict = { state: 'conflicts' as const, at: 0 }
 
-		expect(CONFLICTS_TTL_MILLISECONDS).toBe(5 * 60 * 1000)
-		expect(isFresh(conflict, CONFLICTS_TTL_MILLISECONDS - 1, CONFLICTS_TTL_MILLISECONDS)).toBe(true)
-		expect(isFresh(conflict, CONFLICTS_TTL_MILLISECONDS, CONFLICTS_TTL_MILLISECONDS)).toBe(false)
+		expect(CONFLICTS_TTL_MILLISECONDS).toBe(10 * 60 * 1000)
+		expect(isConflictFresh(conflict, undefined, CONFLICTS_TTL_MILLISECONDS - 1)).toBe(true)
+		expect(isConflictFresh(conflict, SHA_A, CONFLICTS_TTL_MILLISECONDS - 1)).toBe(true)
+		expect(isConflictFresh(conflict, undefined, CONFLICTS_TTL_MILLISECONDS)).toBe(false)
+	})
+
+	it('drops a state read for another head commit at once', () => {
+		const conflict = { state: 'clean' as const, at: 0, headSha: SHA_A }
+
+		expect(isConflictFresh(conflict, SHA_A, 1)).toBe(true)
+		expect(isConflictFresh(conflict, SHA_B, 1)).toBe(false)
+		expect(isConflictFresh(conflict, undefined, 1)).toBe(true)
 	})
 })
 
@@ -48,12 +92,20 @@ describe('evictOldest', () => {
 
 describe('storage', () => {
 	it('merges written entries into the stored map and drops malformed ones on read', async () => {
-		await fakeBrowser.storage.local.set({ [STATS_KEY]: { 'o/r/1': entry(1), bad: { at: 'x' } } })
+		await fakeBrowser.storage.local.set({
+			[STATS_KEY]: {
+				'o/r/1': entry(1),
+				bad: { at: 'x' },
+				badHead: { ...entry(1), headSha: 1 },
+			},
+		})
 		await writeStatsEntry('o/r/2', { failed: true, at: 2 })
+		await writeStatsEntry('o/r/3', { ...entry(3), headSha: SHA_A })
 
 		await expect(readStatsCache()).resolves.toEqual({
 			'o/r/1': entry(1),
 			'o/r/2': { failed: true, at: 2 },
+			'o/r/3': { ...entry(3), headSha: SHA_A },
 		})
 	})
 
@@ -65,11 +117,11 @@ describe('storage', () => {
 				bad: { state: 'unknown', at: 1 },
 			},
 		})
-		await writeConflictsEntry('o/r/2', { state: 'clean', at: 2 })
+		await writeConflictsEntry('o/r/2', { state: 'clean', at: 2, headSha: SHA_A })
 
 		await expect(readConflictsCache()).resolves.toEqual({
 			'o/r/1': { state: 'conflicts', at: 1 },
-			'o/r/2': { state: 'clean', at: 2 },
+			'o/r/2': { state: 'clean', at: 2, headSha: SHA_A },
 			'o/r/3': { state: 'rebase-blocked', at: 3 },
 		})
 		await expect(readStatsCache()).resolves.toEqual({})

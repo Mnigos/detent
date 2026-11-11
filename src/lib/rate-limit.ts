@@ -63,3 +63,33 @@ export async function readRateLimit(
 
 	return retryAfterMilliseconds === undefined ? {} : { retryAfterMilliseconds }
 }
+
+/**
+ * How the service worker reports a failed list request to the content script. `status` 0 is a network error, which
+ * during a rate limit is the limit itself (GitHub's 429 may come without CORS headers).
+ */
+export interface ErrorResponse {
+	status: number
+	retryAfterMilliseconds?: number
+	isRateLimited?: true
+	isPaused?: true
+}
+
+export function errorResponse(error: unknown): ErrorResponse {
+	if (error instanceof RequestPausedError) return { status: 0, isPaused: true }
+	if (error instanceof RateLimitError)
+		return error.retryAfterMilliseconds === undefined
+			? { status: 429, isRateLimited: true }
+			: { status: 429, isRateLimited: true, retryAfterMilliseconds: error.retryAfterMilliseconds }
+	const status = (error as { status?: unknown } | undefined)?.status
+
+	return { status: typeof status === 'number' ? status : 0 }
+}
+
+/** Rethrows a paused or rate-limited answer as its error; returns the status of any other failure. */
+export function statusOf(response: ErrorResponse | undefined): number {
+	if (response?.isPaused) throw new RequestPausedError()
+	if (response?.isRateLimited) throw new RateLimitError(response.retryAfterMilliseconds)
+
+	return response?.status ?? 0
+}

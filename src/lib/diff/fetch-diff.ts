@@ -1,13 +1,16 @@
 import { browser } from 'wxt/browser'
-import { isRateLimitPaused } from '../list/rate-limit'
+import type { Send } from '../list/request-queue'
 import type { PullRequestLocation } from '../pull-request-url'
-import { type RateLimit, readRateLimit } from '../rate-limit'
+import { type RateLimit, RequestPausedError, readRateLimit } from '../rate-limit'
 
 export const FETCH_DIFF_MESSAGE = 'detent:fetch-diff'
 
 type PullRequestRef = Pick<PullRequestLocation, 'owner' | 'repo' | 'number'>
 
-/** `isList`: a pull request list asks, so a 5xx is not retried while the lists are paused for a rate limit. */
+/**
+ * `isList`: a pull request list asks, so the service worker sends it through the shared list queue, which holds it
+ * back while the lists are paused for a rate limit.
+ */
 export interface FetchDiffRequest extends PullRequestRef {
 	type: typeof FETCH_DIFF_MESSAGE
 	isList?: boolean
@@ -37,13 +40,12 @@ const RETRY_MILLISECONDS = 1500
 const RETRY_CAP_MILLISECONDS = 20_000
 
 // GitHub answers 5xx while it is still generating the diff of a large pull request, which can take
-// tens of seconds; the retries back off exponentially to about a minute in total.
-export async function fetchPullRequestDiff({
-	owner,
-	repo,
-	number,
-	isList = false,
-}: PullRequestRef & { isList?: boolean }): Promise<string> {
+// tens of seconds; the retries back off exponentially to about a minute in total. `send` is fetch, or the list
+// queue's, which throws RequestPausedError instead of sending while the lists are paused.
+export async function fetchPullRequestDiff(
+	{ owner, repo, number }: PullRequestRef,
+	send: Send = fetch,
+): Promise<string> {
 	let status = 0
 	for (let attempt = 0; attempt < RETRIES; attempt += 1) {
 		if (attempt > 0)
@@ -53,12 +55,17 @@ export async function fetchPullRequestDiff({
 					Math.min(RETRY_CAP_MILLISECONDS, RETRY_MILLISECONDS * 2 ** (attempt - 1)),
 				),
 			)
-		// While GitHub rate-limits the lists, a list's retry would only add to it; the list asks again after the pause.
-		if (attempt > 0 && isList && (await isRateLimitPaused()))
-			throw new PullRequestDiffError(status, undefined, true)
-		const response = await fetch(`https://github.com/${owner}/${repo}/pull/${number}.diff`, {
-			credentials: 'include',
-		})
+		let response: Response
+		try {
+			response = await send(`https://github.com/${owner}/${repo}/pull/${number}.diff`, {
+				credentials: 'include',
+			})
+		} catch (error) {
+			// While GitHub rate-limits the lists, a list's request would only add to it; the list asks again after the pause.
+			if (error instanceof RequestPausedError)
+				throw new PullRequestDiffError(status, undefined, true)
+			throw error
+		}
 		if (response.ok) return response.text()
 
 		const rateLimit = await readRateLimit(response)
