@@ -1,3 +1,5 @@
+import { RateLimitError, readRateLimit } from '../rate-limit'
+
 /** `rebase-blocked`: a merge commit or squash would go through, "Rebase and merge" would not. */
 export type ConflictState = 'conflicts' | 'rebase-blocked' | 'clean' | 'unknown'
 
@@ -81,7 +83,8 @@ export const isSignedIn = (root: ParentNode = document) =>
 const REBASE_QUERY = '?merge_method=REBASE&bypass_requirements=false'
 
 // Same origin as the list, so the content script sends the session cookie without the service worker.
-// Resolves to undefined for an answer that is not usable JSON.
+// Resolves to undefined for an answer that is not usable JSON. A rate limit throws RateLimitError, so it is never
+// taken for a refusal.
 async function requestMergeBox({ owner, repo, number }: PullRequestRef, query = '') {
 	const response = await fetch(
 		`https://github.com/${owner}/${repo}/pull/${number}/page_data/merge_box${query}`,
@@ -94,6 +97,8 @@ async function requestMergeBox({ owner, repo, number }: PullRequestRef, query = 
 			},
 		},
 	)
+	const rateLimit = await readRateLimit(response)
+	if (rateLimit) throw new RateLimitError(rateLimit.retryAfterMilliseconds)
 	if (response.status === 401 || response.status === 403 || response.status === 404)
 		throw new MergeBoxUnavailableError(response.status)
 	if (!response.ok) return undefined

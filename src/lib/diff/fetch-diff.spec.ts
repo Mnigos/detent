@@ -33,6 +33,21 @@ describe('fetchPullRequestDiff', () => {
 		await expect(fetchPullRequestDiff(location)).rejects.toMatchObject({ status: 404 })
 	})
 
+	it('does not retry a rate limit and reports it with Retry-After', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(new Response('', { status: 429, headers: { 'Retry-After': '120' } }))
+		vi.stubGlobal('fetch', fetchMock)
+
+		const error = await fetchPullRequestDiff(location).catch((error: unknown) => error)
+		expect(error).toBeInstanceOf(PullRequestDiffError)
+		expect(error).toMatchObject({ status: 429, rateLimit: { retryAfterMilliseconds: 120_000 } })
+		expect(fetchMock).toHaveBeenCalledOnce()
+
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })))
+		await expect(fetchPullRequestDiff(location)).rejects.toMatchObject({ rateLimit: undefined })
+	})
+
 	it('retries a 5xx with backoff while GitHub generates a large diff and gives up after six tries', async () => {
 		vi.useFakeTimers()
 		const fetchMock = vi
@@ -72,6 +87,18 @@ describe('requestPullRequestDiff', () => {
 		vi.mocked(browser.runtime.sendMessage).mockResolvedValue({ status: 404 } as never)
 
 		await expect(requestPullRequestDiff(location)).rejects.toMatchObject({ status: 404 })
+	})
+
+	it('rethrows the rate limit the service worker reports', async () => {
+		vi.mocked(browser.runtime.sendMessage).mockResolvedValue({
+			status: 429,
+			rateLimit: { retryAfterMilliseconds: 30_000 },
+		} as never)
+
+		await expect(requestPullRequestDiff(location)).rejects.toMatchObject({
+			status: 429,
+			rateLimit: { retryAfterMilliseconds: 30_000 },
+		})
 	})
 
 	it('treats a missing reply as an unknown failure', async () => {

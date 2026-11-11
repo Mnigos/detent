@@ -31,9 +31,11 @@ export default defineBackground(() => {
 			fetchPullRequestDiff(message)
 				.then((text) => sendResponse({ text } satisfies FetchDiffResponse))
 				.catch((error: unknown) =>
-					sendResponse({
-						status: error instanceof PullRequestDiffError ? error.status : 0,
-					} satisfies FetchDiffResponse),
+					sendResponse(
+						(error instanceof PullRequestDiffError
+							? { status: error.status, rateLimit: error.rateLimit }
+							: { status: 0 }) satisfies FetchDiffResponse,
+					),
 				)
 			return true
 		}

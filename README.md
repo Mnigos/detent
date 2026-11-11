@@ -16,7 +16,9 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   `+additions −deletions · N files`, counted from the pull request's diff and cached for 10 minutes,
   and, when you are signed in, a red `Conflicts` marker on an open pull request whose branch
   conflicts with its base, or an orange `Can't rebase` one when it merges but would not rebase
-  cleanly, read from GitHub's merge box and cached for 5 minutes.
+  cleanly, read from GitHub's merge box and cached for 5 minutes. When GitHub rate-limits these
+  requests, the list waits as long as GitHub asks (a minute if it does not say, longer on repeats)
+  and then fills in the rows still missing.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
