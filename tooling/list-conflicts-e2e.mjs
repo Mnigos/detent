@@ -10,8 +10,10 @@
 // of allowsRebase; the rebase one (merge_method=REBASE) answers a failed conflict condition on the rows of
 // isRebaseBlocked, CLEAN on the other rows that allow rebase, and a refused merge method (BLOCKED, as a repository
 // without rebase merging answers, with no word on the conflict) everywhere else. So both markers run on GitHub's
-// real list DOM, and a build that asked only for rebase would lose the conflicts on the squash-only rows. The page is
-// scrolled to the end, so every row is asked about.
+// real list DOM, and a build that asked only for rebase would lose the conflicts on the squash-only rows. Every
+// computed default answer carries a conversation resolution rule: failed on the rows of isUnresolved (conflicting
+// ones included), passed on the others, as on a repository that requires resolution and has open threads elsewhere.
+// The page is scrolled to the end, so every row is asked about.
 // Run 3 (simulated rate limit): as run 2, but every merge box request in the first second answers 429 with
 // Retry-After: 6. No request may follow for those six seconds, and the markers must still all appear after the pause.
 // Run 4 (request cost): a short window, so only part of the list is near the viewport. Before scrolling only rows on
@@ -34,6 +36,7 @@ const rules = {
 	conflicts: numbers(process.env.CONFLICTS) ?? null,
 	unknown: numbers(process.env.UNKNOWN) ?? null,
 	rebase: numbers(process.env.REBASE) ?? null,
+	unresolved: numbers(process.env.UNRESOLVED) ?? null,
 }
 const isConflicting = (number) => rules.conflicts?.includes(number) ?? number % 3 === 0
 const isUnknown = (number) => rules.unknown?.includes(number) ?? number % 3 === 1
@@ -43,6 +46,9 @@ const isRebaseBlocked = (number) =>
 	!isConflicting(number) &&
 	!isUnknown(number) &&
 	(rules.rebase?.includes(number) ?? number % 4 === 0)
+// Rows whose unresolved conversations block the merge; an unknown answer says nothing about them.
+const isUnresolved = (number) =>
+	!isUnknown(number) && (rules.unresolved?.includes(number) ?? number % 5 === 0)
 // A clean default answer that offers rebase merging is asked once more, for rebase.
 const asksTwice = (number) => allowsRebase(number) && !isConflicting(number) && !isUnknown(number)
 const RETRY_AFTER_SECONDS = 6
@@ -65,11 +71,20 @@ function wrapWorkerFetch({ signedIn, rateLimitWindow, rules, retryAfterSeconds, 
 	const allowsRebase = (n) => rules.rebase?.includes(n) || n % 2 === 0
 	const isRebaseBlocked = (n) =>
 		!isConflicting(n) && !isUnknown(n) && (rules.rebase?.includes(n) ?? n % 4 === 0)
+	const isUnresolved = (n) => rules.unresolved?.includes(n) ?? n % 5 === 0
 	const condition = (result) => ({
 		type: 'PULL_REQUEST_MERGE_CONFLICT_STATE',
 		result,
 		conflicts: [],
 	})
+	const resolution = (number) => {
+		const result = isUnresolved(number) ? 'FAILED' : 'PASSED'
+		return {
+			type: 'PULL_REQUEST_RULES',
+			result,
+			ruleRollups: [{ ruleType: 'REQUIRED_REVIEW_THREAD_RESOLUTION', result, metadata: null }],
+		}
+	}
 	function answer(number, query) {
 		const pullRequest = (mergeStateStatus) => ({
 			state: 'OPEN',
@@ -102,13 +117,13 @@ function wrapWorkerFetch({ signedIn, rateLimitWindow, rules, retryAfterSeconds, 
 		if (isConflicting(number))
 			return {
 				pullRequest: pullRequest('DIRTY'),
-				mergeRequirements: { conditions: [condition('FAILED')] },
+				mergeRequirements: { conditions: [condition('FAILED'), resolution(number)] },
 			}
 		if (isUnknown(number)) return { pullRequest: pullRequest('UNKNOWN'), mergeRequirements: {} }
 
 		return {
-			pullRequest: pullRequest('CLEAN'),
-			mergeRequirements: { conditions: [condition('PASSED')] },
+			pullRequest: pullRequest(isUnresolved(number) ? 'BLOCKED' : 'CLEAN'),
+			mergeRequirements: { conditions: [condition('PASSED'), resolution(number)] },
 		}
 	}
 	globalThis.fetch = async function (input, init) {
@@ -190,6 +205,7 @@ const readRows = (page) =>
 		[...document.querySelectorAll('li a[data-testid="listitem-title-link"]')].map((link) => {
 			const row = link.closest('li')
 			const marker = row?.querySelector('[data-detent-conflicts]')
+			const unresolved = row?.querySelector('[data-detent-unresolved]')
 			return {
 				number: Number(/\/pull\/(\d+)/.exec(link.getAttribute('href') ?? '')?.[1]),
 				state: row?.querySelector('svg.octicon')?.getAttribute('aria-label'),
@@ -197,7 +213,14 @@ const readRows = (page) =>
 				conflicts: marker?.getAttribute('title') ?? null,
 				marker: marker?.getAttribute('data-detent-conflicts') ?? null,
 				text: marker?.textContent ?? null,
-				line: marker?.parentElement?.textContent ?? null,
+				unresolved: unresolved?.textContent ?? null,
+				unresolvedTitle: unresolved?.getAttribute('title') ?? null,
+				// The unresolved marker trails the meta line, after any conflict marker.
+				unresolvedLast: unresolved
+					? unresolved.parentElement?.lastElementChild === unresolved
+					: null,
+				afterConflict: unresolved && marker ? marker.nextElementSibling === unresolved : null,
+				line: (marker ?? unresolved)?.parentElement?.textContent ?? null,
 				top: (row?.getBoundingClientRect().top ?? 0) + window.scrollY,
 				near:
 					(row?.getBoundingClientRect().bottom ?? 0) > 0 &&
@@ -285,6 +308,7 @@ async function run(name, url, { signedIn, rateLimited = false }) {
 		marked: rows.filter((row) => row.conflicts).map((row) => row.number),
 		conflicting: markedAs('conflicts'),
 		rebaseBlocked: markedAs('rebase-blocked'),
+		unresolved: rows.filter((row) => row.unresolved).map((row) => row.number),
 		rows,
 		screenshot,
 	}
@@ -293,7 +317,7 @@ async function run(name, url, { signedIn, rateLimited = false }) {
 // Moves every cached entry back in time, as if it had been stored that long ago.
 const ageCaches = (worker, milliseconds) =>
 	worker.evaluate(async (milliseconds) => {
-		const stored = await chrome.storage.local.get(['diffStats:v2', 'mergeConflicts:v3'])
+		const stored = await chrome.storage.local.get(['diffStats:v2', 'mergeConflicts:v4'])
 		for (const cache of Object.values(stored))
 			for (const entry of Object.values(cache)) entry.at -= milliseconds
 		await chrome.storage.local.set(stored)
@@ -465,8 +489,25 @@ const checks = {
 			signedIn.rows.every((row) => row.marker !== 'rebase-blocked' || row.text === "·Can't rebase")
 		)
 	})(),
+	'signed in marks exactly the rows whose conversation resolution rule fails as Unresolved comments':
+		(() => {
+			const expected = openRows.map((row) => row.number).filter(isUnresolved)
+			return (
+				expected.length > 0 &&
+				JSON.stringify(signedIn.unresolved) === JSON.stringify(expected) &&
+				signedIn.rows.every(
+					(row) =>
+						!row.unresolved ||
+						(row.unresolved === '·Unresolved comments' &&
+							row.unresolvedTitle === 'Resolve all comments before this can merge' &&
+							row.unresolvedLast &&
+							(row.marker === null || row.afterConflict)),
+				)
+			)
+		})(),
 	'closed list asks for nothing and marks nothing':
-		closed.asked.length === 0 && closed.marked.length === 0,
+		closed.asked.length === 0 && closed.marked.length === 0 && closed.unresolved.length === 0,
+	'signed out shows no unresolved marker': signedOut.unresolved.length === 0,
 	// Every request in the first second answers 429; the next one waits out Retry-After from the first.
 	'rate-limited list sends nothing more until Retry-After has passed': (() => {
 		const [first] = limited.requests
@@ -518,9 +559,12 @@ console.log(
 				asked: signedIn.asked.length,
 				conflicting: signedIn.conflicting,
 				rebaseBlocked: signedIn.rebaseBlocked,
+				unresolved: signedIn.unresolved,
 				lines: [
 					signedIn.rows.find((row) => row.marker === 'conflicts')?.line,
 					signedIn.rows.find((row) => row.marker === 'rebase-blocked')?.line,
+					signedIn.rows.find((row) => row.unresolved && row.marker)?.line,
+					signedIn.rows.find((row) => row.unresolved && !row.marker)?.line,
 				],
 			},
 			cost,
