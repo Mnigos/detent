@@ -4,18 +4,21 @@ import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root'
 import { showAnalysisBadge, showKeyBadge } from '@/src/lib/panel/analysis-badge'
 import {
 	clearDimming,
+	fileSections,
 	observeColorMode,
 	observeMutations,
 	readViewedPaths,
 	resolveColorMode,
 	scrollToFile,
 	setDimmedPaths,
+	setHiddenPaths,
 	toggleViewed,
 } from '@/src/lib/panel/github-dom'
 import { panelKeyAction } from '@/src/lib/panel/keys'
 import { createReviewSession } from '@/src/lib/panel/session'
 import { STATUS_LINES } from '@/src/lib/panel/status'
 import { currentFile, isLayerComplete } from '@/src/lib/panel/store'
+import { hiddenTestPaths } from '@/src/lib/panel/test-filter'
 import type { PullRequestLocation } from '@/src/lib/pull-request-url'
 import { Panel } from './Panel'
 import './style.css'
@@ -32,7 +35,9 @@ export async function startPanel(ctx: ContentScriptContext, location: PullReques
 		)
 		const dimmed = new Set<string>()
 		if (!state.isRaw) for (const path of anchorIds.keys()) if (!current.has(path)) dimmed.add(path)
-		setDimmedPaths(dimmed)
+		const sections = fileSections()
+		setDimmedPaths(dimmed, sections)
+		setHiddenPaths(hiddenTestPaths(state), sections)
 	}
 
 	let position = currentFile(store.getSnapshot())?.path

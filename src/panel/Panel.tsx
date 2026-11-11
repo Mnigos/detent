@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react'
+import { toggleHideTests } from '@/src/lib/panel/hide-tests'
 import { currentFile, isLayerComplete, type PanelStore } from '@/src/lib/panel/store'
+import { hiddenTestPaths, hiddenTestsHint } from '@/src/lib/panel/test-filter'
 import { FileList } from './FileList'
 import { LayerList } from './LayerList'
 import { Toast } from './Toast'
@@ -17,6 +19,7 @@ interface PanelProps {
 export function Panel({ store, onScrollToFile, onToggleViewed }: PanelProps) {
 	const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
 	const layer = state.layers[state.layerIndex]
+	const hiddenTests = hiddenTestPaths(state).size
 
 	if (state.isCollapsed)
 		return (
@@ -54,6 +57,19 @@ export function Panel({ store, onScrollToFile, onToggleViewed }: PanelProps) {
 				</button>
 				<button
 					type="button"
+					onClick={() => toggleHideTests(store)}
+					aria-pressed={state.isHidingTests}
+					title={state.isHidingTests ? 'Show test files' : 'Hide test files'}
+					className={`rounded border px-2 py-0.5 text-[11px] ${
+						state.isHidingTests
+							? 'border-sky-500 bg-sky-500/15 text-sky-700 dark:text-sky-300'
+							: 'border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-400'
+					}`}
+				>
+					Hide tests
+				</button>
+				<button
+					type="button"
 					onClick={() => store.dispatch({ type: 'toggle-collapsed' })}
 					aria-label="Collapse panel"
 					className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] text-neutral-600 dark:border-neutral-700 dark:text-neutral-400"
@@ -63,6 +79,18 @@ export function Panel({ store, onScrollToFile, onToggleViewed }: PanelProps) {
 			</header>
 
 			<div className="min-h-0 flex-1 overflow-y-auto">
+				{hiddenTests > 0 && (
+					<p className="px-4 pt-2 text-[11px] text-neutral-500" data-detent-hint="">
+						{hiddenTestsHint(hiddenTests)}
+						<button
+							type="button"
+							onClick={() => toggleHideTests(store)}
+							className="ml-1 text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+						>
+							Show
+						</button>
+					</p>
+				)}
 				<LayerList
 					layers={state.layers}
 					layerIndex={state.layerIndex}

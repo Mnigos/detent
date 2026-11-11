@@ -8,9 +8,9 @@ afterEach(() => document.body.replaceChildren())
 
 describe('Layers | Priority | Files', () => {
 	it('creates three ordered, accessible buttons with the Priority explanation', () => {
-		const { element } = createModeToggle(vi.fn())
+		const { element } = createModeToggle(vi.fn(), vi.fn())
 		expect(element.id).toBe(TOGGLE_ID)
-		const buttons = [...element.querySelectorAll('button')]
+		const buttons = [...element.querySelectorAll<HTMLButtonElement>('button[data-mode]')]
 		expect(buttons.map((button) => [button.textContent, button.dataset.mode, button.type])).toEqual(
 			[
 				['Layers', 'layers', 'button'],
@@ -23,10 +23,11 @@ describe('Layers | Priority | Files', () => {
 
 	it('dispatches exactly the selected mode once per click, including after repeated updates', () => {
 		const onSetMode = vi.fn()
-		const toggle = createModeToggle(onSetMode)
+		const toggle = createModeToggle(onSetMode, vi.fn())
 		toggle.update(state())
 		toggle.update(state())
-		for (const button of toggle.element.querySelectorAll('button')) button.click()
+		for (const button of toggle.element.querySelectorAll<HTMLButtonElement>('button[data-mode]'))
+			button.click()
 		expect(onSetMode.mock.calls).toEqual([['layers'], ['priority'], ['files']])
 	})
 
@@ -36,7 +37,7 @@ describe('Layers | Priority | Files', () => {
 		[true, false, 'files'],
 		[true, true, 'files'],
 	] as const)('selects one button for isRaw=%s, isPriority=%s', (isRaw, isPriority, selected) => {
-		const toggle = createModeToggle(vi.fn())
+		const toggle = createModeToggle(vi.fn(), vi.fn())
 		// Reuse the same DOM through every transition so stale pressed states are detected.
 		for (const flags of [
 			{ isRaw: !isRaw, isPriority: !isPriority },
@@ -44,7 +45,7 @@ describe('Layers | Priority | Files', () => {
 		])
 			toggle.update({ ...state(), ...flags })
 		expect(
-			[...toggle.element.querySelectorAll('button')].map((button) => [
+			[...toggle.element.querySelectorAll<HTMLButtonElement>('button[data-mode]')].map((button) => [
 				button.dataset.mode,
 				button.getAttribute('aria-pressed'),
 				button.dataset.variant,
