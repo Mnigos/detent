@@ -39,7 +39,10 @@ beforeEach(() => {
 		),
 	)
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+	vi.useRealTimers()
+	vi.unstubAllGlobals()
+})
 
 const pending = () => vaultStore.get('pending') as Pending
 const account = () => vaultStore.get('account') as Account | undefined
@@ -246,6 +249,51 @@ describe('completeSignIn', () => {
 			ok: false,
 		})
 		expect(account()?.tokens).toBeUndefined()
+	})
+
+	it('keeps no attempt when a sign-out lands while the sign-in is prepared', async () => {
+		const starting = beginSignIn()
+		await signOut()
+
+		await expect(starting).rejects.toThrow('signed out')
+		expect(vaultStore.has('pending')).toBe(false)
+	})
+
+	it('says so when a sign-out overtook the exchange and OpenAI did not confirm the revocation', async () => {
+		await beginSignIn()
+		const { state } = pending()
+		answerTokens()
+		const answer = tokenAnswer
+		let release!: () => void
+		tokenAnswer = () => new Promise((resolve) => (release = () => resolve(answer())))
+		const fetchMock = vi.mocked(fetch)
+		const route = fetchMock.getMockImplementation()
+		fetchMock.mockImplementation(async (url, init) =>
+			url === REVOKE_URL
+				? new Response(null, { status: 503 })
+				: (route?.(url, init) as Promise<Response>),
+		)
+		const completing = completeSignIn(callback({ code: 'c', state, client_id: 'oaiapp_issued' }))
+		await vi.waitFor(() => expect(release).toBeDefined())
+		await signOut()
+		// The revocation retries with backoff; the clock only moves once nothing else waits on it.
+		vi.useFakeTimers({ toFake: ['setTimeout'] })
+		release()
+		let isSettled = false
+		void completing.finally(() => {
+			isSettled = true
+		})
+		// WebCrypto settles on real event-loop turns, so the clock moves a step at a time.
+		while (!isSettled) {
+			await new Promise((resolve) => setImmediate(resolve))
+			await vi.advanceTimersByTimeAsync(1000)
+		}
+
+		await expect(completing).resolves.toMatchObject({
+			ok: false,
+			message: expect.stringContaining('did not confirm'),
+		})
+		vi.useRealTimers()
 	})
 
 	it('revokes instead of saving the tokens of an exchange a sign-out overtook', async () => {

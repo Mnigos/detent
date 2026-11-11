@@ -50,6 +50,7 @@ export async function hostId(): Promise<string> {
 
 /** Builds the authorize URL and keeps the attempt's secrets until the callback. */
 export async function beginSignIn(): Promise<string> {
+	const epoch = currentSignInEpoch()
 	const account = await readAccount()
 	const clientId = account?.clientId ?? DYNAMIC_CLIENT_ID
 	const isRegistration = clientId === DYNAMIC_CLIENT_ID
@@ -80,6 +81,8 @@ export async function beginSignIn(): Promise<string> {
 	const url = new URL(AUTHORIZE_URL)
 	for (const [name, value] of Object.entries(params))
 		if (value !== undefined) url.searchParams.set(name, value)
+	// A sign-out while this was prepared wins: no attempt is kept and no page opens.
+	if (currentSignInEpoch() !== epoch) throw new Error('signed out while the sign-in was prepared')
 	await vault.set(PENDING_KEY, pending)
 	await clearNotice()
 
@@ -214,8 +217,12 @@ async function finish(href: string): Promise<SignInResult> {
 
 	// Signed out while this exchange ran: the new session is ended at OpenAI too, not saved.
 	if (currentSignInEpoch() !== epoch) {
-		if (tokens.refreshToken) await revoke(clientId, tokens.refreshToken)
-		return fail('Signed out while signing in. Continue with ChatGPT to sign in again.')
+		const revoked = tokens.refreshToken ? await revoke(clientId, tokens.refreshToken) : true
+		return fail(
+			revoked
+				? 'Signed out while signing in. Continue with ChatGPT to sign in again.'
+				: 'Signed out while signing in, but OpenAI did not confirm it. You can disconnect detent in ChatGPT settings.',
+		)
 	}
 	const account = { clientId, subject: identity.subject, email: identity.email }
 	if (!tokens.scopes.includes(PLAN_SCOPE)) {
