@@ -25,6 +25,15 @@ vi.mock('@/src/lib/diff/fetch-diff', async (importOriginal) => ({
 	requestPullRequestDiff: vi.fn(async () => ''),
 }))
 
+// Stored stats as the current build counts them: every line is code.
+const counted = (additions: number, deletions: number, files: number) => ({
+	additions,
+	deletions,
+	files,
+	code: { additions, deletions },
+	excluded: {},
+})
+
 const FIXTURE = readFileSync(resolve(process.cwd(), 'fixtures/github-pulls-list.html'), 'utf8')
 
 type Row = { number: number; icon?: string }
@@ -660,8 +669,8 @@ describe('list stats by head commit', () => {
 		const at = Date.now() - 3 * 24 * 60 * MINUTE
 		await fakeBrowser.storage.local.set({
 			[STATS_KEY]: {
-				'o/r/1': { additions: 5, deletions: 1, files: 2, at, headSha: sha('a') },
-				'o/r/2': { additions: 7, deletions: 0, files: 1, at, headSha: sha('b') },
+				'o/r/1': { ...counted(5, 1, 2), at, headSha: sha('a') },
+				'o/r/2': { ...counted(7, 0, 1), at, headSha: sha('b') },
 			},
 		})
 		renderList([{ number: 1 }, { number: 2 }], '')
@@ -681,8 +690,8 @@ describe('list stats by head commit', () => {
 	it('keeps the ten minutes for a row the list data does not cover', async () => {
 		await fakeBrowser.storage.local.set({
 			[STATS_KEY]: {
-				'o/r/1': { additions: 5, deletions: 1, files: 2, at: Date.now() - 11 * MINUTE },
-				'o/r/2': { additions: 5, deletions: 1, files: 2, at: Date.now() - MINUTE },
+				'o/r/1': { ...counted(5, 1, 2), at: Date.now() - 11 * MINUTE },
+				'o/r/2': { ...counted(5, 1, 2), at: Date.now() - MINUTE },
 			},
 		})
 		renderList([{ number: 1 }, { number: 2 }], '')
@@ -699,8 +708,8 @@ describe('list stats by head commit', () => {
 		const at = Date.now() - 60 * MINUTE
 		await fakeBrowser.storage.local.set({
 			[STATS_KEY]: {
-				'o/r/1': { additions: 5, deletions: 1, files: 2, at, headSha: sha('a') },
-				'o/r/2': { additions: 5, deletions: 1, files: 2, at, headSha: sha('b') },
+				'o/r/1': { ...counted(5, 1, 2), at, headSha: sha('a') },
+				'o/r/2': { ...counted(5, 1, 2), at, headSha: sha('b') },
 			},
 		})
 		listHeads = [
@@ -813,7 +822,7 @@ describe('list rows near the viewport', () => {
 		stubIntersectionObserver()
 		const at = Date.now()
 		await fakeBrowser.storage.local.set({
-			[STATS_KEY]: { 'o/r/3': { additions: 1, deletions: 1, files: 1, at } },
+			[STATS_KEY]: { 'o/r/3': { ...counted(1, 1, 1), at } },
 			[CONFLICTS_KEY]: { 'o/r/3': { state: 'conflicts', at } },
 		})
 		renderList([1, 2, 3].map((number) => ({ number })))
