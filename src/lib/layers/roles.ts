@@ -48,7 +48,10 @@ const RULES: [FileRole, RegExp][] = [
 		'migration',
 		/\/migrations\/[^/]+\.sql$|\/migrations\/.*\.[jt]s$|\.migration\.|\/prisma\/migrations\//,
 	],
-	['test', /\.spec\.|\.test\.|\/__tests__\/|\/tests\/|\/e2e\//],
+	[
+		'test',
+		/\.spec\.|\.test\.|\/__tests__\/|\/tests?\/|\/e2e\/|\/(__)?fixtures?(__)?\/|_test\.(go|py)$|\/test_[^/]+\.py$|_spec\.rb$/,
+	],
 	['docs', /\.mdx?$|\/docs\//],
 	[
 		'config',
