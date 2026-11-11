@@ -150,6 +150,26 @@ describe('accessToken', () => {
 		expect(account()?.tokens).toMatchObject({ refreshToken: 'refresh-1', idToken: 'id-0' })
 	})
 
+	it('keeps a later token refused even when an older refusal arrives late', async () => {
+		vaultStore.set('account', {
+			...ACCOUNT,
+			tokens: { ...ACCOUNT.tokens, accessToken: 'late-a' } as never,
+		})
+		invalidateAccessToken('late-a')
+		await expect(accessToken()).resolves.toBe('access-1')
+		invalidateAccessToken('access-1')
+		invalidateAccessToken('late-a')
+
+		tokenAnswer = async () =>
+			Response.json({
+				access_token: 'access-2',
+				refresh_token: 'refresh-2',
+				id_token: await signer.sign(idClaims()),
+				expires_in: 3600,
+			})
+		await expect(accessToken()).resolves.toBe('access-2')
+	})
+
 	it('refreshes a token the API refused', async () => {
 		vaultStore.set('account', ACCOUNT)
 		invalidateAccessToken('access-0')
@@ -190,6 +210,28 @@ describe('accessToken', () => {
 })
 
 describe('signOut', () => {
+	it('starts no refresh while it revokes, and revokes the token a running refresh rotated', async () => {
+		vaultStore.set('account', expired())
+		const answer = tokenAnswer
+		let releaseRefresh!: () => void
+		tokenAnswer = () => new Promise((resolve) => (releaseRefresh = () => resolve(answer())))
+		let answerRevoke!: (response: Response) => void
+		revokeAnswer = () => new Promise((resolve) => (answerRevoke = resolve))
+		const running = accessToken()
+		await vi.waitFor(() => expect(releaseRefresh).toBeDefined())
+		const signingOut = signOut()
+		await expect(accessToken()).rejects.toThrow(SignInRequired)
+		releaseRefresh()
+
+		await expect(running).rejects.toThrow(SignInRequired)
+		await vi.waitFor(() => expect(answerRevoke).toBeDefined())
+		answerRevoke(new Response(null, { status: 200 }))
+		await expect(signingOut).resolves.toEqual({ revoked: true })
+		expect(form(REVOKE_URL).token).toBe('refresh-1')
+		expect(calls(TOKEN_URL)).toHaveLength(1)
+		expect(account()?.tokens).toBeUndefined()
+	})
+
 	it('revokes the refresh token, then drops the tokens and keeps the registration', async () => {
 		vaultStore.set('account', ACCOUNT)
 
