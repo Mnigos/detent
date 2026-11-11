@@ -71,7 +71,7 @@ export async function chatGptProvider({
 	if (!(await readAccount())?.tokens) return undefined
 
 	// A saved model the account no longer lists falls back to the default, as the popup shows it.
-	// Without the list (offline) the saved choice is used as it is.
+	// Without the list (offline) the saved choice is used as it is, or gpt-6-luna when none is saved.
 	const models = await listModels().catch(() => [])
 	const model = pickModel(chatgptModel, models)
 	return {

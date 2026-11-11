@@ -30,7 +30,8 @@ const PREFERRED_FAMILY = 'luna'
 
 /**
  * The saved choice while the account still lists it. Otherwise `gpt-6-luna`, then the first listed
- * Luna (the server lists newer versions first), then the first listed model.
+ * Luna (the server lists newer versions first), then the first listed model. Without a list the
+ * saved choice is used as it is, and `gpt-6-luna` when nothing is saved.
  */
 export function pickModel(saved: string, models: ChatGptModel[]) {
 	const slugs = models.map((model) => model.slug)
@@ -40,7 +41,7 @@ export function pickModel(saved: string, models: ChatGptModel[]) {
 		slugs.find((slug) => slug === PREFERRED_MODEL) ??
 		slugs.find((slug) => slug.includes(PREFERRED_FAMILY)) ??
 		slugs[0] ??
-		saved
+		(saved || PREFERRED_MODEL)
 	)
 }
 

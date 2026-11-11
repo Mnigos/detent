@@ -83,6 +83,14 @@ describe('chatGptProvider', () => {
 		await expect(chatGptProvider(SETTINGS)).resolves.toMatchObject({ model: 'gpt-6-luna' })
 	})
 
+	it('asks gpt-6-luna under its usual cache key when nothing is chosen and the list fails', async () => {
+		vi.mocked(listModels).mockRejectedValue(new Error('HTTP 503'))
+		const provider = await chatGptProvider({ ...SETTINGS, chatgptModel: '' })
+
+		expect(provider).toMatchObject({ model: 'gpt-6-luna', labeler: 'chatgpt:gpt-6-luna' })
+		await expect(provider?.group('input')).resolves.toEqual({ value: LAYERS })
+	})
+
 	it('takes the Luna default when none is chosen', async () => {
 		vi.mocked(listModels).mockResolvedValue([
 			{ slug: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
