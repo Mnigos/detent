@@ -86,6 +86,14 @@ const actions: Record<string, (message: { href?: unknown }) => Promise<unknown>>
 	},
 }
 
+const SIGN_IN_FAILED = { ok: false, message: 'ChatGPT sign-in failed. Try again.' }
+// A failure answers in the shape its caller expects. Status and sign-out answer nothing: the popup
+// then says ChatGPT did not answer or the sign-out failed, instead of reading it as signed out.
+const failures: Record<string, unknown> = {
+	[CHATGPT_MESSAGE.signIn]: SIGN_IN_FAILED,
+	[CHATGPT_MESSAGE.callback]: SIGN_IN_FAILED,
+}
+
 /** Answers a ChatGPT message; `false` leaves the message to the other listeners. */
 export function handleChatGptMessage(
 	message: unknown,
@@ -104,7 +112,7 @@ export function handleChatGptMessage(
 		.then(reply)
 		.catch((error: unknown) => {
 			console.warn('[detent] chatgpt', error instanceof Error ? error.message : error)
-			reply({ ok: false, message: 'ChatGPT sign-in failed. Try again.' })
+			reply(failures[String(type)])
 		})
 	return true
 }
