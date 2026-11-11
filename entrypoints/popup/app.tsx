@@ -114,7 +114,7 @@ export function App({
 			</div>
 			<p className="text-[11px] text-neutral-500">
 				{isChatGpt
-					? 'Diffs and descriptions of the pull requests you open go to OpenAI and count against your ChatGPT plan.'
+					? 'Diffs and descriptions of the pull requests you open go to OpenAI and count against your ChatGPT plan. Signing in and loading the model list also reach OpenAI.'
 					: 'Diffs and descriptions of the pull requests you open go to OpenRouter under your key.'}{' '}
 				Nothing else leaves the browser.{' '}
 				<a
