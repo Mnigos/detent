@@ -51,28 +51,34 @@ On the pull request page:
 - Keyboard: j and k move between files, n and p between steps, Enter scrolls to the file, v marks
   it as viewed, r switches to GitHub's own order.
 
-A model is optional. Add an OpenRouter API key in the popup and pick a model: it names and orders
+A model is optional. In the popup, choose OpenRouter and add your API key, or choose ChatGPT and
+sign in with your ChatGPT account to use your ChatGPT plan. Then pick a model: it names and orders
 the steps, following a description that tells reviewers where to start, and ranks the files for
 Priority Review. Grouping and Priority Review are separate requests, each cached in the browser per
-pull request, model and diff revision, so switching models or pushing new commits asks again. Without a key the steps come from the file structure and the priorities
-from file paths and change sizes, computed locally. The popup shows what your requests cost so
-far, and has switches to turn detent off or to hide the list diff sizes and conflicts and the
-header's lines of code.
+pull request, provider, model and diff revision, so switching models or pushing new commits asks
+again. Without a provider the steps come from the file structure and the priorities from file paths
+and change sizes, computed locally. The popup shows what your OpenRouter requests cost so far, or
+how many requests went to your ChatGPT plan, and has switches to turn detent off or to hide the list
+diff sizes and conflicts and the header's lines of code.
 
 What leaves the browser: diffs are downloaded from GitHub with your GitHub session. Only when you
-saved an OpenRouter key, the title, description, changed file paths and diff excerpts of the pull
-request you open go to OpenRouter under that key. Diff sizes and conflict states on lists never go
-to OpenRouter.
-There is no detent server and no analytics.
+set up a provider, the title, description, changed file paths and diff excerpts of the pull request
+you open go to OpenRouter under your key, or to OpenAI under your ChatGPT account. Diff sizes and
+conflict states on lists never go to a model. There is no detent server and no analytics.
 
 Source code (GPL-3.0): https://github.com/Mnigos/detent
 
 ## Permission justifications
 
-- **storage**: keeps the settings (OpenRouter key, model, two switches), cached step groupings
-  and priority rankings per pull request revision, cached diff sizes and conflict states for pull
-  request lists and headers, and a local usage counter in the browser. Session storage holds the review
-  position of the open pull request.
+- **storage**: keeps the settings (provider, OpenRouter key, OpenRouter and ChatGPT models, two
+  switches), cached step groupings and priority rankings per pull request revision, cached diff
+  sizes and conflict states for pull request lists and headers, and local usage counters in the
+  browser. Session storage holds the review position of the open pull request. ChatGPT tokens are
+  not kept here but in the extension's own IndexedDB, which content scripts cannot read.
+- **declarativeNetRequestWithHostAccess**: one session rule. ChatGPT's sign-in returns to
+  `http://127.0.0.1:47801/auth/callback`, the loopback address OpenAI requires for open-source
+  apps. The rule turns that navigation into the extension's callback page before the browser sends
+  it, so the one-time code never reaches a local program listening on that port.
 - **Host permission `https://github.com/*`**: the extension renders inside GitHub pull request
   pages and pull request lists. It matches the whole site because GitHub moves between pages by
   in-page navigation, where a script matched only on `/pull/` or `/pulls` URLs would never run. On
@@ -91,16 +97,29 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
   the redirect itself.
 - **Host permission `https://openrouter.ai/*`**: sends the optional model requests (step grouping
   and Priority Review ranking) with the user's own key.
+- **Host permission `https://auth.openai.com/*`**: the optional "Continue with ChatGPT" sign-in. The
+  service worker exchanges the one-time code for tokens, refreshes them, revokes them on sign-out
+  and loads OpenAI's public keys to verify the ID token.
+- **Host permission `https://api.openai.com/*`**: sends the optional model requests to OpenAI's
+  Responses API on the user's ChatGPT plan, and lists the models that account may use.
+- **Host permission `http://127.0.0.1/*`**: Chrome applies a declarativeNetRequest redirect only to
+  hosts the extension has access to. The extension never sends a request to 127.0.0.1; it only
+  redirects the sign-in callback away from it.
+- **Web accessible resource `chatgpt-callback.html`** (matches `https://auth.openai.com/*` only):
+  Chrome lets a navigation that starts on a web page enter an extension page only when that page is
+  web accessible to the starting site. OpenAI's consent page is that site.
 - **Remote code:** none. All code ships in the package.
 
 ## Data usage disclosure (Privacy practices tab)
 
-- Collects: **website content** (pull request diffs, titles and descriptions) and **authentication
-  information** (the user's own OpenRouter API key). Both stay in the browser unless the user saved
-  a key; then the website content of the open pull request is sent to OpenRouter with that key as
-  the bearer token. Pull request numbers and diff counts kept in local caches never leave the
-  browser.
-- Not collected: personally identifiable information, health, financial or payment information,
+- Collects: **website content** (pull request diffs, titles and descriptions), **authentication
+  information** (the user's own OpenRouter API key, or the OAuth tokens OpenAI issues when the user
+  signs in with ChatGPT) and **personally identifiable information** (the email address and account
+  ID in the ChatGPT ID token, shown in the popup). All of it stays in the browser unless the user
+  set up a provider; then the website content of the open pull request is sent to OpenRouter with
+  the key, or to OpenAI with the access token, as the bearer token. Pull request numbers and diff
+  counts kept in local caches never leave the browser.
+- Not collected: health, financial or payment information,
   personal communications, location, web history, user activity.
 - Certifications: not sold to third parties; not used or transferred for purposes unrelated to the
   single purpose; not used or transferred to determine creditworthiness or for lending.

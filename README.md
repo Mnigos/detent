@@ -36,10 +36,12 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
   stored for the list too. Large pull requests get them as well; the click only gates grouping.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
-derives dependency edges from the added lines. With an OpenRouter API key saved in the popup, a
-model of your choice names and orders the steps and ranks the files, in separate requests cached per
-pull request, model and diff revision. Without a key the steps come from the file structure and the
-priorities from a local path and size heuristic. On a pull request with more than 300 changed files
+derives dependency edges from the added lines. A model provider is optional and chosen in the popup:
+OpenRouter with your API key, or ChatGPT, where "Continue with ChatGPT" signs in with your ChatGPT
+account and the requests use your ChatGPT plan. The model you pick names and orders the steps and
+ranks the files, in separate requests cached per pull request, provider, model and diff revision.
+Without a provider the steps come from the file structure and the priorities from a local path and
+size heuristic. On a pull request with more than 300 changed files
 or 20,000 changed lines, detent waits until you click its corner badge before it fetches the diff,
 and remembers that click for the pull request until the browser session ends. The popup also holds
 two switches, one to turn detent off and one for the list diff sizes and conflicts and the header's
@@ -56,7 +58,22 @@ developer mode on and "Load unpacked". Open a pull request on GitHub and check t
 `[detent]` lines. `bun run test` runs the Vitest suite against the diffs in `fixtures/`,
 `bun run typecheck` runs the TypeScript compiler, `bun run check` runs Biome, and `bun run zip`
 packs the store upload. `node tooling/store-screenshots.mjs` captures the store screenshots after a
-build.
+build, and `node tooling/chatgpt-e2e.mjs` checks the ChatGPT sign-in headlessly up to OpenAI's token
+endpoint without signing in.
+
+## ChatGPT sign-in
+
+detent follows OpenAI's open-source flow for ChatGPT plan usage
+(https://developers.openai.com/siwc/token-sharing-open-source). The service worker opens
+`auth.openai.com` with PKCE (S256), a fresh state and nonce, a stable `urn:uuid` host ID, and
+either `dynamic_agent_client` for the first registration or the issued client ID it saved. OpenAI
+returns to `http://127.0.0.1:47801/auth/callback`; a declarativeNetRequest session rule redirects
+that navigation to `chatgpt-callback.html` before it is sent. The worker checks the state and the
+issued client ID, exchanges the code, verifies the ID token against OpenAI's JWKS (RS256, issuer,
+audience, expiry, nonce) and requires the `chatgpt.tokens.use.direct` scope. Tokens live in the
+extension's IndexedDB. The worker refreshes them five minutes before expiry, one refresh at a time,
+and revokes the refresh token on sign-out. Model calls go to the Responses API with `store: false`
+and `stream: true`, and only `response.completed` counts as an answer.
 
 ## License
 
