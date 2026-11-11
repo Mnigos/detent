@@ -47,8 +47,8 @@ const marked = () =>
 		marker.closest('li')?.querySelector('a[href*="/pull/"]')?.getAttribute('href'),
 	)
 
-// Answers each pull request number with a mergeStateStatus, REBASE_BLOCKED (clean, but the rebase conflict
-// condition failed), or a status code.
+// Answers each pull request number with a mergeStateStatus, REBASE_BLOCKED (clean by default and rebase merging
+// offered, but the conflict condition fails when asked for rebase), or a status code.
 function stubMergeBox(states: Record<number, string | number>) {
 	const fetch = vi.fn(async (url: string) => {
 		const number = Number(/\/pull\/(\d+)\//.exec(url)?.[1])
@@ -56,11 +56,20 @@ function stubMergeBox(states: Record<number, string | number>) {
 		if (typeof state === 'number') return new Response('', { status: state })
 		if (state === 'REBASE_BLOCKED')
 			return Response.json({
-				pullRequest: { state: 'OPEN', mergeStateStatus: 'CLEAN' },
-				mergeRequirements: {
-					conditions: [
-						{ type: 'PULL_REQUEST_MERGE_CONFLICT_STATE', result: 'FAILED', conflicts: [] },
+				pullRequest: {
+					state: 'OPEN',
+					mergeStateStatus: 'CLEAN',
+					viewerMergeActions: [
+						{
+							name: 'DIRECT_MERGE',
+							mergeMethods: [{ name: 'REBASE', allowableStatus: 'ALLOWED' }],
+						},
 					],
+				},
+				mergeRequirements: {
+					conditions: url.includes('merge_method=REBASE')
+						? [{ type: 'PULL_REQUEST_MERGE_CONFLICT_STATE', result: 'FAILED', conflicts: [] }]
+						: [],
 				},
 			})
 
@@ -114,7 +123,7 @@ describe('list merge conflicts', () => {
 
 	it("marks a rebase GitHub would refuse as Can't rebase, and a real conflict only as Conflicts", async () => {
 		renderList([{ number: 1 }, { number: 2 }, { number: 3 }])
-		stubMergeBox({ 1: 'REBASE_BLOCKED', 2: 'DIRTY', 3: 'CLEAN' })
+		const fetch = stubMergeBox({ 1: 'REBASE_BLOCKED', 2: 'DIRTY', 3: 'CLEAN' })
 		await mount()
 
 		await vi.waitFor(() =>
@@ -126,6 +135,8 @@ describe('list merge conflicts', () => {
 		expect(
 			document.querySelector(`[${CONFLICTS_ATTRIBUTE}="rebase-blocked"]`)?.getAttribute('title'),
 		).toBe(REBASE_BLOCKED_TITLE)
+		// Only the row whose default answer offers rebase merging is asked a second time.
+		expect(mergeBoxCalls(fetch)).toEqual([1, 1, 2, 3])
 		await expect(readConflictsCache()).resolves.toMatchObject({
 			'o/r/1': { state: 'rebase-blocked' },
 			'o/r/2': { state: 'conflicts' },
@@ -217,6 +228,38 @@ describe('list merge conflicts', () => {
 		await new Promise((done) => setTimeout(done, 20))
 
 		expect(marked()).toEqual([])
+	})
+
+	it('keeps the rebase follow-up request inside the same three requests at a time', async () => {
+		renderList([1, 2, 3, 4, 5, 6].map((number) => ({ number })))
+		let inFlight = 0
+		let most = 0
+		const fetch = vi.fn(async (_url: string) => {
+			inFlight += 1
+			most = Math.max(most, inFlight)
+			await new Promise((done) => setTimeout(done, 5))
+			inFlight -= 1
+
+			return Response.json({
+				pullRequest: {
+					state: 'OPEN',
+					mergeStateStatus: 'CLEAN',
+					viewerMergeActions: [
+						{
+							name: 'DIRECT_MERGE',
+							mergeMethods: [{ name: 'REBASE', allowableStatus: 'ALLOWED' }],
+						},
+					],
+				},
+				mergeRequirements: { conditions: [] },
+			})
+		})
+		vi.stubGlobal('fetch', fetch)
+		await mount()
+
+		await vi.waitFor(async () => expect(Object.keys(await readConflictsCache())).toHaveLength(6))
+		expect(fetch).toHaveBeenCalledTimes(12)
+		expect(most).toBeLessThanOrEqual(3)
 	})
 
 	it('drops waiting requests for rows a new filter removed', async () => {
