@@ -75,10 +75,12 @@ describe('storage', () => {
 		await expect(readStatsCache()).resolves.toEqual({})
 	})
 
-	it('keeps conflict states under a key of their own shape and ignores the boolean entries before it', async () => {
-		expect(CONFLICTS_KEY).toBe('mergeConflicts:v2')
+	it('keeps conflict states under a key of their own and ignores the entries of older builds', async () => {
+		expect(CONFLICTS_KEY).toBe('mergeConflicts:v3')
 		await fakeBrowser.storage.local.set({
 			mergeConflicts: { 'o/r/1': { hasConflicts: true, at: 1 } },
+			// v2 asked only for rebase merging and stored "clean" for conflicts on repositories without it.
+			'mergeConflicts:v2': { 'o/r/3': { state: 'clean', at: Date.now() } },
 			[CONFLICTS_KEY]: { 'o/r/2': { hasConflicts: true, at: 2 } },
 		})
 

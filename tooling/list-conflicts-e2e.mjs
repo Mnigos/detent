@@ -1,9 +1,12 @@
 // Loads the built extension into headless Chromium, signed out, on a public pull request list.
 // Usage: bun run build && node tooling/list-conflicts-e2e.mjs
 // Run 1 (signed out as GitHub serves it): no merge box request and no marker, the diff stats still show.
-// Run 2 (simulated sign-in): the list's empty user-login meta tag is filled in and every merge box request is
-// answered DIRTY, UNKNOWN, CLEAN with a failed rebase conflict condition, or CLEAN (see isConflicting, isUnknown
-// and isRebaseBlocked), so both markers run on GitHub's real list DOM.
+// Run 2 (simulated sign-in): the list's empty user-login meta tag is filled in and both merge box requests are
+// stubbed. The default one (no merge_method) answers DIRTY, UNKNOWN or CLEAN, offering rebase merging on the rows
+// of allowsRebase; the rebase one (merge_method=REBASE) answers a failed conflict condition on the rows of
+// isRebaseBlocked, CLEAN on the other rows that allow rebase, and a refused merge method (BLOCKED, as a repository
+// without rebase merging answers, with no word on the conflict) everywhere else. So both markers run on GitHub's
+// real list DOM, and a build that asked only for rebase would lose the conflicts on the squash-only rows.
 // The real signed-in merge box answer is not covered; check it by hand in a signed-in browser.
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -21,9 +24,59 @@ const unknownOf = numbers(process.env.UNKNOWN)
 const isConflicting = (number) => conflictsOf?.includes(number) ?? number % 3 === 0
 const isUnknown = (number) => unknownOf?.includes(number) ?? number % 3 === 1
 const rebaseOf = numbers(process.env.REBASE)
+// Even rows (and REBASE ones) offer rebase merging; odd rows are squash-only, conflicting ones included.
+const allowsRebase = (number) => rebaseOf?.includes(number) || number % 2 === 0
 const isRebaseBlocked = (number) =>
-	!isConflicting(number) && !isUnknown(number) && (rebaseOf?.includes(number) ?? number % 2 === 0)
+	!isConflicting(number) && !isUnknown(number) && (rebaseOf?.includes(number) ?? number % 4 === 0)
+// A clean default answer that offers rebase merging is asked once more, for rebase.
+const asksTwice = (number) => allowsRebase(number) && !isConflicting(number) && !isUnknown(number)
 const MERGE_BOX = /\/pull\/(\d+)\/page_data\/merge_box/
+const DEFAULT_QUERY = ''
+const REBASE_QUERY = '?merge_method=REBASE&bypass_requirements=false'
+const methods = (number) => [
+	{ name: 'MERGE', allowableStatus: 'DISABLED' },
+	{ name: 'SQUASH', allowableStatus: 'ALLOWED' },
+	{ name: 'REBASE', allowableStatus: allowsRebase(number) ? 'ALLOWED' : 'DISABLED' },
+]
+const conflictCondition = (result) => ({
+	type: 'PULL_REQUEST_MERGE_CONFLICT_STATE',
+	result,
+	conflicts: [],
+})
+
+// The stub's answer to one merge box request, by pull request number and query.
+function answer(number, query) {
+	const pullRequest = (mergeStateStatus) => ({
+		state: 'OPEN',
+		mergeStateStatus,
+		viewerMergeActions: [{ name: 'DIRECT_MERGE', mergeMethods: methods(number) }],
+	})
+	if (query === REBASE_QUERY) {
+		if (!allowsRebase(number))
+			return {
+				pullRequest: pullRequest('BLOCKED'),
+				mergeRequirements: {
+					conditions: [{ type: 'PULL_REQUEST_MERGE_METHOD', result: 'FAILED' }],
+				},
+			}
+		if (isRebaseBlocked(number))
+			return {
+				pullRequest: pullRequest('CLEAN'),
+				mergeRequirements: { conditions: [conflictCondition('FAILED')] },
+			}
+	}
+	if (isConflicting(number))
+		return {
+			pullRequest: pullRequest('DIRTY'),
+			mergeRequirements: { conditions: [conflictCondition('FAILED')] },
+		}
+	if (isUnknown(number)) return { pullRequest: pullRequest('UNKNOWN'), mergeRequirements: {} }
+
+	return {
+		pullRequest: pullRequest('CLEAN'),
+		mergeRequirements: { conditions: [conflictCondition('PASSED')] },
+	}
+}
 
 async function run(name, url, { signedIn }) {
 	const context = await chromium.launchPersistentContext(
@@ -40,12 +93,12 @@ async function run(name, url, { signedIn }) {
 	)
 	const page = context.pages()[0] ?? (await context.newPage())
 	const asked = []
-	const queries = new Set()
+	const requests = []
 	page.on('request', (request) => {
 		const match = MERGE_BOX.exec(request.url())
 		if (!match) return
 		asked.push(Number(match[1]))
-		queries.add(new URL(request.url()).search)
+		requests.push({ number: Number(match[1]), query: new URL(request.url()).search })
 	})
 	if (signedIn) {
 		await page.route(
@@ -60,17 +113,9 @@ async function run(name, url, { signedIn }) {
 			},
 		)
 		await page.route(MERGE_BOX, (route) => {
-			const number = Number(MERGE_BOX.exec(route.request().url())?.[1])
-			const status = isConflicting(number) ? 'DIRTY' : isUnknown(number) ? 'UNKNOWN' : 'CLEAN'
-			const conditions = isRebaseBlocked(number)
-				? [{ type: 'PULL_REQUEST_MERGE_CONFLICT_STATE', result: 'FAILED', conflicts: [] }]
-				: []
-			return route.fulfill({
-				json: {
-					pullRequest: { state: 'OPEN', mergeStateStatus: status },
-					mergeRequirements: { conditions },
-				},
-			})
+			const url = new URL(route.request().url())
+			const number = Number(MERGE_BOX.exec(url.pathname)?.[1])
+			return route.fulfill({ json: answer(number, url.search) })
 		})
 	}
 	await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
@@ -118,7 +163,7 @@ async function run(name, url, { signedIn }) {
 		signedIn,
 		// Every request, repeats included, so a request loop fails the per-row count.
 		asked: asked.sort((a, b) => a - b),
-		queries: [...queries],
+		requests,
 		marked,
 		conflicting: markedAs('conflicts'),
 		rebaseBlocked: markedAs('rebase-blocked'),
@@ -131,7 +176,8 @@ const report = {
 	output: OUTPUT,
 	conflicts: conflictsOf ?? 'n % 3 = 0',
 	unknown: unknownOf ?? 'n % 3 = 1',
-	rebaseBlocked: rebaseOf ?? 'the other even n',
+	rebaseAllowed: rebaseOf ? `${rebaseOf} and even n` : 'even n',
+	rebaseBlocked: rebaseOf ?? 'the other n % 4 = 0',
 	runs: [],
 }
 report.runs.push(await run('signed-out', LIST, { signedIn: false }))
@@ -145,21 +191,37 @@ const checks = {
 	'signed out asks for no merge box': signedOut.asked.length === 0,
 	'signed out shows no marker': signedOut.marked.length === 0,
 	'signed out still shows diff stats': signedOut.rows.some((row) => row.stats),
-	// One request per open row; an unknown row may get its single retry 15 s later, if the run lasted that long.
-	'signed in asks once per open row, unknown ones at most twice': openRows.every((row) => {
-		const count = signedIn.asked.filter((number) => number === row.number).length
-		return count === 1 || (count === 2 && isUnknown(row.number))
-	}),
+	// One default request per open row; an unknown row may get its single retry 15 s later, if the run lasted that
+	// long. One rebase request more only for a clean row that offers rebase merging.
+	'signed in asks the default merge box once per open row, unknown ones at most twice':
+		openRows.every((row) => {
+			const count = signedIn.requests.filter(
+				(request) => request.number === row.number && request.query === DEFAULT_QUERY,
+			).length
+			return count === 1 || (count === 2 && isUnknown(row.number))
+		}),
+	'signed in asks for rebase exactly once per clean row that offers it': (() => {
+		const rebaseAsked = signedIn.requests.filter((request) => request.query === REBASE_QUERY)
+		const expected = openRows
+			.map((row) => row.number)
+			.filter(asksTwice)
+			.sort((a, b) => a - b)
+		return (
+			expected.length > 0 &&
+			JSON.stringify(rebaseAsked.map((request) => request.number).sort((a, b) => a - b)) ===
+				JSON.stringify(expected)
+		)
+	})(),
 	'signed in asks only about open rows': signedIn.asked.every((number) =>
 		openRows.some((row) => row.number === number),
 	),
-	'signed in asks for rebase merging': (() =>
-		signedIn.queries.length === 1 &&
-		signedIn.queries[0] === '?merge_method=REBASE&bypass_requirements=false')(),
-	'signed in marks exactly the conflicting rows as Conflicts': (() => {
+	'signed in asks only the two known merge box shapes': signedIn.requests.every((request) =>
+		[DEFAULT_QUERY, REBASE_QUERY].includes(request.query),
+	),
+	'signed in marks exactly the conflicting rows as Conflicts, squash-only ones included': (() => {
 		const expected = openRows.map((row) => row.number).filter(isConflicting)
 		return (
-			expected.length > 0 &&
+			(conflictsOf !== undefined || expected.some((number) => !allowsRebase(number))) &&
 			JSON.stringify(signedIn.conflicting) === JSON.stringify(expected) &&
 			signedIn.rows.every((row) => row.marker !== 'conflicts' || row.text === '·Conflicts')
 		)

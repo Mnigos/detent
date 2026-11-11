@@ -5,7 +5,7 @@ import type { DiffStats } from './stats'
 export const STATS_KEY = 'diffStats'
 export const STATS_TTL_MILLISECONDS = 10 * 60 * 1000
 // The version moves whenever the stored shape changes, so entries of an older build are not read.
-export const CONFLICTS_KEY = 'mergeConflicts:v2'
+export const CONFLICTS_KEY = 'mergeConflicts:v3'
 // Conflicts appear when the base branch moves, which the row does not show, so they are asked again soon.
 export const CONFLICTS_TTL_MILLISECONDS = 5 * 60 * 1000
 export const STATS_CAP = 500
