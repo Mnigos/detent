@@ -6,6 +6,7 @@
 //    list's empty user-login meta tag is filled in and the merge box answers are stubbed in the service worker, the
 //    way tooling/list-conflicts-e2e.mjs does: one row conflicts, one cannot be rebased, one has unresolved comments.
 // 3. header: a pull request's header with the code lines after GitHub's +additions −deletions.
+//    A label in the corner of the shot says the markers are illustrated.
 // 4. image preview: an image from a pull request description opened over the page.
 // 5. popup: the popup with the provider choice, laid over the layers page.
 // Priority Review is not captured: it lives on GitHub's new Changes page, which GitHub serves only to signed-in users.
@@ -175,6 +176,15 @@ async function list(page) {
 	const markers = new Set([...rules.conflicts, ...rules.rebaseBlocked, ...rules.unresolved]).size
 	await page.waitForFunction(listIsReady, markers, { timeout: 90_000 })
 	await page.waitForTimeout(1500)
+	// The merge states are stubbed on real pull requests; the image says so itself, since the store has no captions.
+	await page.evaluate(() => {
+		const label = document.createElement('div')
+		label.textContent = 'Merge markers illustrated. They need a GitHub sign-in.'
+		label.style.cssText =
+			'position:fixed;right:16px;bottom:16px;z-index:99999;padding:6px 12px;border-radius:6px;' +
+			'background:#1f2328;color:#f0f6fc;border:1px solid #3d444d;font:13px system-ui,sans-serif'
+		document.body.append(label)
+	})
 	await page.screenshot({ path: shot('screenshot-2-list-sizes-markers.png') })
 	await page.unrouteAll({ behavior: 'wait' })
 }
