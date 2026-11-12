@@ -1,18 +1,22 @@
 # Privacy policy
 
-Last updated: 11 November 2026
+Last updated: 12 November 2026
 
 detent for GitHub is a browser extension that groups the files of a GitHub pull request into review
-steps, ranks them by review priority, shows the diff size and merge conflicts of pull requests
-on pull request lists, and the lines of code in a pull request's header. This policy describes what the extension does with data. It applies to the extension
-published in the Chrome Web Store and to builds from this repository.
+steps, ranks them by review priority, shows the diff size and merge state of pull requests on pull
+request lists and the lines of code in a pull request's header, and opens images from descriptions and
+comments over the page. This policy describes what the extension does with data. It applies to the
+extension published in the Chrome Web Store and to builds from this repository.
 
 ## What the extension processes
 
 - **Pull request diffs and descriptions.** When you open a pull request on github.com, the extension
   downloads its unified diff from `github.com`, which redirects to `patch-diff.githubusercontent.com`,
-  with your GitHub session, and reads the title and description of the pull request. It derives the
-  review steps and the structural priorities from them.
+  with your GitHub session, and reads the title and description of the pull request. When the open page
+  does not show the description (Files changed, Changes), it loads the pull request's conversation page
+  from `github.com` once, with your GitHub session, to read it. It derives the review steps and the
+  structural priorities from them. On a pull request with more than 300 changed files or 20,000 changed
+  lines it downloads nothing until you click its badge.
 - **Diff sizes on pull request lists.** On a repository's pull request list
   (`github.com/<owner>/<repo>/pulls`), the extension downloads the diff of each listed pull request
   on screen or one screen below the same way, three at a time across all tabs, and counts its added
@@ -33,7 +37,10 @@ published in the Chrome Web Store and to builds from this repository.
   pull request page makes for its merge box. Only whether the branch has conflicts, or cannot be
   rebased, and whether unresolved conversations block the merge is kept, with the head commit it was
   read for. No comment or thread content is read. Signed out it asks nothing.
-  The "Show diff size and conflicts on pull request lists, and code lines in pull request headers" switch in the popup turns these and the header's lines of code off.
+  The "Show diff size and conflicts on pull request lists, and code lines in pull request headers"
+  switch in the popup turns these and the header's lines of code off. The "Group pull request files into
+  layers" switch turns detent off on GitHub's pages, except for the image preview, which has its own
+  switch; then detent sends no request for the pages you visit.
 - **Model requests.** Only if you set up a model provider in the popup, requests go directly from
   your browser to that provider: to `openrouter.ai` with your OpenRouter API key, or to
   `api.openai.com` under your ChatGPT account when you chose ChatGPT and signed in. Each request
@@ -56,9 +63,12 @@ published in the Chrome Web Store and to builds from this repository.
   offline_access resource.invoke chatgpt.tokens.use.direct`. This gives it your account's email
   address and the right to send model requests on your plan. It gets no access to your ChatGPT
   conversations.
-- **Viewed state and position.** Which files you marked as viewed and where you are in the review
-  are read from the GitHub page and kept in the browser's session storage for the current pull
-  request.
+- **Viewed state and position.** Which files you marked as viewed is read from the GitHub page each
+  time and not stored. Where you are in the review (the step, the file and its path) is kept in the
+  browser's session storage for the current pull request.
+- **Image preview.** Clicking an image in a pull request description or comment shows it over the page.
+  The preview uses the image the page already loaded, from the same address; it downloads, stores and
+  sends nothing else. "Open original" opens the image's link in a new tab only when you click it.
 
 ## What is stored, and where
 
@@ -71,6 +81,8 @@ Everything the extension stores stays in your browser's extension storage:
 - cached Priority Review rankings, per pull request, model and diff revision (the last five
   revisions of each pull request),
 - whether the Hide tests switch is on,
+- in session storage, until the browser closes: the review position of each pull request you opened and
+  whether you clicked to group a large pull request,
 - diff sizes for pull request lists and headers: owner, repository, pull request number,
   additions, deletions, file count, the code line counts with what each excluded kind took, the head commit they were
   counted for and the time they were counted, reused while the list shows that commit for up to 7
@@ -87,8 +99,10 @@ Everything the extension stores stays in your browser's extension storage:
   email address from the ID token, the access, refresh and ID tokens, and a random ID for this
   browser profile (`ext_agent_host_id`) that OpenAI uses to tell installs apart. These sit in the
   extension's own IndexedDB database, which only detent's service worker opens. Pages you visit and
-  detent's script on github.com cannot read it. The access and refresh tokens never appear in a
-  URL or a log; the ID token goes only to OpenAI's sign-in page, as a hint for the next sign-in.
+  detent's script on github.com cannot read it. While a sign-in is in progress the same database
+  holds that attempt's state, nonce and PKCE verifier, deleted when OpenAI answers, and a short
+  notice for the popup, such as a failed sign-in or a reached usage limit. The access and refresh tokens never appear in a URL or a
+  log; the ID token and the email go only to OpenAI's sign-in page, as hints for the next sign-in.
 
 The extension has no server of its own. It sends nothing to the author or any analytics service.
 
@@ -120,7 +134,8 @@ The extension has no server of its own. It sends nothing to the author or any an
 
 ## Removing data
 
-Remove the extension to delete everything it stored. Clearing the OpenRouter key stops requests to
+Remove the extension to delete everything it stored, including the IndexedDB database. Session
+storage is cleared when the browser closes. Clearing the OpenRouter key stops requests to
 OpenRouter. "Sign out" in the popup asks OpenAI to end the session, then deletes the tokens; the
 issued client ID and your account ID stay so the next sign-in returns to the same registration. You
 can also disconnect detent in ChatGPT's settings. Each usage counter has its own reset in the popup.
