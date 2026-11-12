@@ -105,7 +105,8 @@ export default defineContentScript({
 			const settings = await readSettings()
 			const { isEnabled, showListStats, showImagePreview } = settings
 			void syncHeader(settings)
-			previewsImages = isEnabled && showImagePreview
+			// The preview has its own switch; the main one only covers layers and list stats.
+			previewsImages = showImagePreview
 			if (!previewsImages) closeImagePreview()
 			const view = !isEnabled
 				? undefined
