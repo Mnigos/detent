@@ -1,10 +1,12 @@
 // Captures the Chrome Web Store screenshots (1280x800 PNG) from the built extension in headless Playwright Chromium,
 // in a fresh temporary profile, signed out, on public TanStack/router pages. It never starts a visible browser.
-// Usage: bun run build && node tooling/store-screenshots.mjs
+// Usage: bun run build && node tooling/store-screenshots.mjs [layers list header imagePreview popup]
+// Names given on the command line capture only those shots; popup reuses the layers shot already on disk.
 // 1. layers: the classic Files changed page with the panel and Hide tests switched on.
 // 2. list: the pull request list with diff sizes and code lines. Conflict markers need a GitHub sign-in, so the
 //    list's empty user-login meta tag is filled in and the merge box answers are stubbed in the service worker, the
 //    way tooling/list-conflicts-e2e.mjs does: one row conflicts, one cannot be rebased, one has unresolved comments.
+//    Titles, numbers and authors are blurred, so the stubbed states point at no real pull request or person.
 // 3. header: a pull request's header with the code lines after GitHub's +additions −deletions.
 //    A label in the corner of the shot says the markers are illustrated.
 // 4. image preview: an image from a pull request description opened over the page.
@@ -175,6 +177,14 @@ async function list(page) {
 	await page.goto(LIST, { waitUntil: 'domcontentloaded' })
 	const markers = new Set([...rules.conflicts, ...rules.rebaseBlocked, ...rules.unresolved]).size
 	await page.waitForFunction(listIsReady, markers, { timeout: 90_000 })
+	// Blurs what names a real pull request or person; detent's stats and markers and GitHub's chrome stay sharp.
+	await page.addStyleTag({
+		content: `
+			li a[data-testid="listitem-title-link"],
+			li :has(> [data-testid="timestamp-container"]) > span:first-child,
+			li [data-testid="author-filter-link"],
+			li img { filter: blur(6px) }`,
+	})
 	await page.waitForTimeout(1500)
 	// The merge states are stubbed on real pull requests; the image says so itself, since the store has no captions.
 	await page.evaluate(() => {
@@ -238,11 +248,9 @@ async function popup(page) {
 
 try {
 	const page = context.pages()[0] ?? (await context.newPage())
-	await layers(page)
-	await list(page)
-	await header(page)
-	await imagePreview(page)
-	await popup(page)
+	const only = process.argv.slice(2)
+	for (const capture of [layers, list, header, imagePreview, popup])
+		if (only.length === 0 || only.includes(capture.name)) await capture(page)
 	console.log('screenshots written to', OUTPUT)
 } finally {
 	await context.close()
