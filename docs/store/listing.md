@@ -1,165 +1,206 @@
 # Chrome Web Store listing
 
-Everything below is ready to paste into the developer dashboard.
+Material for the first submission of detent for GitHub 0.1.0. Each section maps to a field or tab in the
+developer dashboard. Checked against the manifest that `bun run build` writes to
+`.output/chrome-mv3/manifest.json`.
 
-## Basics
+## Store listing tab
 
-- **Name:** detent for GitHub
-- **Category:** Developer Tools (in the Productivity group)
-- **Language:** English
-- **Visibility for the first release:** Unlisted (anyone with the link can install; no search listing)
+- Name: detent for GitHub
+- Category: Developer Tools
+- Language: English
+- Visibility: Public
 
-## Short description (132 characters max)
+### Short description
 
-The store shows the manifest `description` from `wxt.config.ts` as the summary; keep both the same.
+The store shows the manifest `description` from `wxt.config.ts` as the summary, so the two stay the same
+(128 of 132 characters):
 
-Review GitHub pull requests in ordered layers, rank files by review risk, and see diff sizes on pull request lists.
+Review GitHub pull requests in ordered layers, rank files by priority, and see diff sizes, code lines and conflicts on PR lists.
 
-## Full description
+### Full description
 
-detent changes how you read a GitHub pull request, and shows how big each pull request is, and
-whether it has merge conflicts, before you open it.
+```text
+detent changes how you read a GitHub pull request, and shows how big each pull request is before you open it.
 
-Layers. The changed files are grouped into review steps instead of one alphabetical list: one
-behavior change per step, with the data shape first, then the code that implements it, then its
-tests and docs. Each step has a title and one sentence saying what to verify, and counts how many
-of its files you already marked as viewed. Steps and files follow their dependencies, so you read
-definitions before callers.
-
-Priority Review. On GitHub's new Changes page the file tree gets three modes: Layers, Priority and
-Files. Priority sorts the files into Urgent (at most 10), High, Medium and Low, with a one-line
-reason on the Urgent and High ones, so a reviewer short on time knows what to read first. Low
-starts folded.
-
-Diff size and conflicts on pull request lists. On a repository's pull request list every row shows
-+additions −deletions · N files, with the lines of code alone in parentheses after the totals when
-tests, docs, lockfiles, generated files, blank and comment lines or whitespace-only changes make up
-part of the diff, and a red Conflicts marker on an open pull request whose branch conflicts with its
-base, or an orange Can't rebase one when it merges but would not rebase cleanly, followed by an
-orange Unresolved comments marker when the repository requires conversation resolution and open
-conversations block the merge (signed in to GitHub).
-
-Lines of code in the pull request header. On every tab of a pull request, GitHub's +additions −deletions
-is followed by the lines of code alone in parentheses, the same way, when part of the diff is not code.
-
-On the pull request page:
-
-- On the Changes page: the Layers | Priority | Files switch in GitHub's file tree, section headers
-  between the steps and a step badge in every sticky file header.
-- On the classic Files changed page: a side panel with the steps and their files.
+Layers
+The changed files are grouped into review steps instead of one alphabetical list: the data shape first, then the code that implements it, then its tests and docs. Each step has a title and one sentence saying what to check, and counts how many of its files you marked as viewed. Files follow their dependencies, so you read definitions before callers.
+- On GitHub's new Changes page, the file tree gets a Layers | Priority | Files switch, section headers between the steps and a step badge in every sticky file header.
+- On the classic Files changed page, a side panel lists the steps and their files.
 - The active step is the first one with unviewed files. Finished steps are dimmed.
-- Keyboard: j and k move between files, n and p between steps, Enter scrolls to the file, v marks
-  it as viewed, r switches to GitHub's own order.
+- Keyboard: j and k move between files, n and p between steps, Enter scrolls to the file, v marks it as viewed, r switches to GitHub's own order.
+- A link to a review comment keeps that comment on screen while detent reorders the files, and makes its file the current one.
 
-A model is optional. In the popup, choose OpenRouter and add your API key, or choose ChatGPT and
-sign in with your ChatGPT account to use your ChatGPT plan. Then pick a model: it names and orders
-the steps, following a description that tells reviewers where to start, and ranks the files for
-Priority Review. Grouping and Priority Review are separate requests, each cached in the browser per
-pull request, provider, model and diff revision, so switching models or pushing new commits asks
-again. Without a provider the steps come from the file structure and the priorities from file paths
-and change sizes, computed locally. The popup shows what your OpenRouter requests cost so far, or
-how many requests went to your ChatGPT plan, and has switches to turn detent off or to hide the list
-diff sizes and conflicts and the header's lines of code.
+Priority Review
+On the Changes page, Priority sorts the files into Urgent (at most 10), High, Medium and Low, with a one-line reason on the Urgent and High ones. Low starts folded.
 
-What leaves the browser: diffs are downloaded from GitHub with your GitHub session. Only when you
-set up a provider, the title, description, changed file paths and diff excerpts of the pull request
-you open go to OpenRouter under your key, or to OpenAI under your ChatGPT account. Diff sizes and
-conflict states on lists never go to a model. There is no detent server and no analytics.
+Hide tests
+A switch next to Layers | Priority | Files, and a Hide tests button in the classic panel, take test files off the page: their tree rows, their diffs and any step left empty. j/k, n/p and the viewed counters skip them. A line above the files says how many are hidden, with Show to bring them back. The choice holds across pull requests.
 
+Large pull requests
+On a pull request with more than 300 changed files or 20,000 changed lines, detent waits for a click on its badge before it downloads and groups the diff.
+
+Pull request lists
+On a repository's pull request list every row shows +additions −deletions · N files. When tests, docs, lockfiles, generated files, blank and comment lines or whitespace-only changes make up part of the diff, the lines of code follow in parentheses: +a −d (+c −e) · N files. When you are signed in to GitHub, an open pull request also gets a red Conflicts marker when its branch conflicts with the base, an orange Can't rebase marker when it merges but would not rebase cleanly, and an orange Unresolved comments marker when the repository requires conversation resolution and open conversations block the merge.
+
+Pull request header
+On every tab of a pull request, GitHub's +additions −deletions is followed by the lines of code in parentheses, counted the same way.
+
+Image preview
+Clicking an image in a description or comment opens it over the page instead of in a new tab. Arrow keys step through that comment's images. Cmd/Ctrl-click still opens the tab.
+
+Model provider (optional)
+In the popup, choose OpenRouter and paste your API key, or choose ChatGPT and sign in with your ChatGPT account to use your ChatGPT plan. The model then names and orders the steps and ranks the files for Priority Review. Answers are cached in the browser per pull request, provider, model and diff revision. Without a provider, the steps come from the file structure and the priorities from file paths and change sizes, computed in the browser. The popup shows what your OpenRouter requests cost so far, or how many requests went to your ChatGPT plan, and has three switches: detent on or off, list and header sizes, and the image preview.
+
+What leaves the browser
+detent downloads diffs and merge box states from GitHub with your GitHub session. Only when you set up a provider, the title, description, changed file paths and diff excerpts of the pull request you open go to OpenRouter under your key, or to OpenAI under your ChatGPT account. List sizes and conflict states never go to a model. There is no detent server and no analytics.
+
+Privacy policy: https://github.com/Mnigos/detent/blob/main/PRIVACY.md
 Source code (GPL-3.0): https://github.com/Mnigos/detent
+```
 
-## Permission justifications
+## Privacy practices tab
 
-- **storage**: keeps the settings (provider, OpenRouter key, OpenRouter and ChatGPT models, three
-  switches), cached step groupings and priority rankings per pull request revision, cached diff
-  sizes and conflict states for pull request lists and headers, and local usage counters in the
-  browser. Session storage holds the review position of the open pull request. ChatGPT tokens are
-  not kept here but in the extension's own IndexedDB, which content scripts cannot read.
-- **declarativeNetRequestWithHostAccess**: one session rule. ChatGPT's sign-in returns to
-  `http://127.0.0.1:47801/auth/callback`, the loopback address OpenAI requires for open-source
-  apps. The rule turns that navigation into the extension's callback page before the browser sends
-  it, so the one-time code never reaches a local program listening on that port.
-- **Host permission `https://github.com/*`**: the extension renders inside GitHub pull request
-  pages and pull request lists. It matches the whole site because GitHub moves between pages by
-  in-page navigation, where a script matched only on `/pull/` or `/pulls` URLs would never run. On
-  other pages it only watches the URL. The service worker downloads each pull request's diff from
-  `https://github.com/<owner>/<repo>/pull/<number>.diff`: for the open pull request to build the
-  steps, for each pull request listed on a `/<owner>/<repo>/pulls` page to count its additions,
-  deletions, files and lines of code, and for the open pull request's header when those counts are
-  not stored yet. On those lists the service worker also reads, with the user's
-  GitHub session, the merge box state GitHub's own page loads from
-  `https://github.com/<owner>/<repo>/pull/<number>/page_data/merge_box`, to mark pull requests with
-  merge conflicts, a blocked rebase or unresolved conversations that block the merge, and after
-  GitHub switches a list to another filter or page, that page's list data as JSON, to know each
-  row's head commit.
-- **Host permission `https://patch-diff.githubusercontent.com/*`**: GitHub redirects those diff
-  downloads to this host, which sends no CORS headers for the page, so the service worker follows
-  the redirect itself.
-- **Host permission `https://openrouter.ai/*`**: sends the optional model requests (step grouping
-  and Priority Review ranking) with the user's own key.
-- **Host permission `https://auth.openai.com/*`**: the optional "Continue with ChatGPT" sign-in. The
-  service worker exchanges the one-time code for tokens, refreshes them, revokes them on sign-out
-  and loads OpenAI's public keys to verify the ID token.
-- **Host permission `https://api.openai.com/*`**: sends the optional model requests to OpenAI's
+### Single purpose
+
+Helps review GitHub pull requests: groups a pull request's changed files into ordered review steps, ranks
+them by review priority, and shows the size and merge state of pull requests on GitHub's pull request lists
+and headers.
+
+### Permission justifications
+
+storage
+
+: Keeps, in `chrome.storage.local`, the settings (provider, OpenRouter key, OpenRouter and ChatGPT model,
+  the three popup switches), the Hide tests choice, cached step groupings and priority rankings per pull
+  request and diff revision, cached diff sizes and merge states for lists and headers, GitHub rate-limit
+  pauses, and the local usage counters. `chrome.storage.session` holds the review position on an open pull
+  request and the click that lets a large pull request be grouped, until the browser closes. ChatGPT tokens
+  are not kept here.
+
+declarativeNetRequestWithHostAccess
+
+: Installs one session rule for the optional "Continue with ChatGPT" sign-in. OpenAI's sign-in for
+  open-source apps only accepts a loopback redirect address, so detent registers
+  `http://127.0.0.1:47801/auth/callback`. The rule redirects that one navigation to the extension's own
+  `chatgpt-callback.html` before the browser sends it, so the one-time code reaches the extension and never a
+  program listening on that port. The "WithHostAccess" variant adds no install warning of its own and acts
+  only on hosts listed in the host permissions. detent has no other rule: it blocks and modifies no other
+  request.
+
+Host `https://github.com/*`
+
+: The content script runs on github.com and renders the steps, Priority Review, Hide tests, list sizes,
+  conflict markers, header code lines and the image preview inside GitHub's pages. It matches the whole site
+  because GitHub moves between pages without reloading, so a script matched only on `/pull/` or `/pulls`
+  pages would never start; elsewhere it only watches the URL. The service worker downloads
+  `https://github.com/<owner>/<repo>/pull/<number>.diff` with the user's GitHub session (for the open pull
+  request, for the rows of a list, and for a header whose counts are not cached), reads
+  `/pull/<number>/page_data/merge_box` for open pull requests on a list when the user is signed in, and
+  after GitHub switches a list to another filter or page, that page's list data as JSON, to learn each row's
+  head commit. When the open page does not show the pull request description (Files changed, Changes), the
+  content script loads the pull request's conversation page once to read it.
+
+Host `https://patch-diff.githubusercontent.com/*`
+
+: GitHub answers the `.diff` requests above with a redirect to this host. It sends no CORS headers, so
+  the service worker needs host access to follow the redirect and read the diff.
+
+Host `https://openrouter.ai/*`
+
+: Only when the user picks OpenRouter and enters a key: sends the step-grouping and Priority Review
+  requests to `https://openrouter.ai/api/v1/chat/completions` with that key.
+
+Host `https://auth.openai.com/*`
+
+: Only when the user picks ChatGPT and signs in: the service worker exchanges the one-time code for tokens,
+  refreshes them, revokes them on sign-out, and loads OpenAI's public signing keys to verify the ID token.
+
+Host `https://api.openai.com/*`
+
+: Only when signed in with ChatGPT: sends the step-grouping and Priority Review requests to OpenAI's
   Responses API on the user's ChatGPT plan, and lists the models that account may use.
-- **Host permission `http://127.0.0.1/*`**: Chrome applies a declarativeNetRequest redirect only to
-  hosts the extension has access to. The extension never sends a request to 127.0.0.1; it only
-  redirects the sign-in callback away from it.
-- **Web accessible resource `chatgpt-callback.html`** (matches `https://auth.openai.com/*` only):
-  Chrome lets a navigation that starts on a web page enter an extension page only when that page is
-  web accessible to the starting site. OpenAI's consent page is that site.
-- **Remote code:** none. All code ships in the package.
 
-## Data usage disclosure (Privacy practices tab)
+Host `http://127.0.0.1/*`
 
-- Collects: **website content** (pull request diffs, titles and descriptions), **authentication
-  information** (the user's own OpenRouter API key, or the OAuth tokens OpenAI issues when the user
-  signs in with ChatGPT) and **personally identifiable information** (the email address and account
-  ID in the ChatGPT ID token; the popup shows the email). All of it stays in the browser unless the user
-  set up a provider; then the website content of the open pull request is sent to OpenRouter with
-  the key, or to OpenAI with the access token, as the bearer token. Pull request numbers and diff
-  counts kept in local caches never leave the browser.
-- Not collected: health, financial or payment information,
-  personal communications, location, web history, user activity.
-- Certifications: not sold to third parties; not used or transferred for purposes unrelated to the
-  single purpose; not used or transferred to determine creditworthiness or for lending.
-- Privacy policy URL: https://github.com/Mnigos/detent/blob/main/PRIVACY.md
+: Chrome applies a declarativeNetRequest redirect only on hosts the extension has access to, and the
+  sign-in redirect above points at 127.0.0.1. detent never fetches anything from 127.0.0.1, injects nothing
+  there and reads nothing from it; the host is listed only so the redirect rule can apply.
 
-## Single purpose statement
+Web accessible resource `chatgpt-callback.html`
 
-Helps review GitHub pull requests: groups a pull request's files into ordered review steps, ranks
-them by review priority, and shows the diff size and merge conflicts of each pull request on pull
-request lists.
+: Limited to `https://auth.openai.com/*`. Chrome lets a navigation that starts on a web page enter an
+  extension page only if that page is web accessible to the starting site, and the sign-in redirect starts
+  on OpenAI's consent page. (WXT also lists `content-scripts/github.css` for `https://github.com/*`, the
+  content script's own stylesheet.)
+
+### Remote code
+
+No, I am not using remote code. All JavaScript ships in the package. Model answers are JSON data that the
+extension parses; it never evaluates them.
+
+### Data usage
+
+Tick these categories:
+
+- Personally identifiable information: the email address and account ID in the ID token OpenAI issues
+  when the user signs in with ChatGPT. Stored in the extension's IndexedDB; the email is shown in the popup
+  and sent back to `auth.openai.com` as a sign-in hint.
+- Authentication information: the user's OpenRouter API key, or the OAuth tokens OpenAI issues after a
+  ChatGPT sign-in. Sent only to the service that issued them, as the bearer token.
+- Website content: pull request diffs, titles and descriptions from github.com. Processed in the browser;
+  only when the user set up a provider, the title, description, changed file paths and diff excerpts of
+  the open pull request go to OpenRouter or OpenAI.
+
+Leave unticked: health, financial and payment information, personal communications, location, web
+history, user activity. Cached sizes and groupings are keyed by pull request and never leave the browser;
+no clicks, keystrokes or browsing history are recorded or sent.
+
+Tick all three certifications:
+
+- I do not sell or transfer user data to third parties, outside of the approved use cases.
+- I do not use or transfer user data for purposes that are unrelated to my item's single purpose.
+- I do not use or transfer user data to determine creditworthiness or for lending purposes.
+
+Privacy policy URL: https://github.com/Mnigos/detent/blob/main/PRIVACY.md
 
 ## Assets
 
-- Icon 128×128: `docs/store/icon-128.png` (also shipped in the package under `icon/`).
-- Small promo tile 440×280: `docs/store/promo-440x280.png`.
-- Screenshots 1280×800, in this order:
-  1. `docs/store/screenshot-1-layers.png`: "A pull request split into review steps, in reading
-     order."
-  2. `docs/store/screenshot-2-navigation.png`: "Move file by file with j and k; the panel follows
-     the diff."
-  3. `docs/store/screenshot-3-next-layer.png`: "Jump to the next step with n."
-  4. `docs/store/screenshot-4-list-stats.png`: "Additions, deletions and file count on every row of
-     a pull request list."
-  5. `docs/store/screenshot-5-priority.png`: "Priority Review: the files to read first, from Urgent
-     to Low."
+- Icon 128×128: `docs/store/icon-128.png` (also in the package under `icon/`).
+- Small promo tile 440×280: `docs/store/promo-440x280.png` (logo and name, no UI).
+- Screenshots 1280×800 PNG, in this order, with captions:
+  1. `docs/store/screenshot-1-layers-hide-tests.png`: "A pull request grouped into review steps, with test
+     files hidden."
+  2. `docs/store/screenshot-2-list-sizes-markers.png`: "Diff size, lines of code and merge state on every
+     pull request in a list. Merge markers need a GitHub sign-in."
+  3. `docs/store/screenshot-3-header-code-lines.png`: "Lines of code next to GitHub's own count in the pull
+     request header."
+  4. `docs/store/screenshot-4-image-preview.png`: "Images from descriptions and comments open over the
+     page."
+  5. `docs/store/screenshot-5-popup.png`: "Pick OpenRouter or your ChatGPT plan to name the steps, or use
+     neither."
 
-Screenshots 1 to 4 come from `bun run build && node tooling/store-screenshots.mjs` (logged out,
-public repositories, Helium, dark theme, layers named from the file structure). Screenshot 5 needs
-a logged-in session on the Changes page and is captured separately.
+`bun run build && node tooling/store-screenshots.mjs` captures all five in headless Chromium with the built
+extension, in a fresh profile, signed out of GitHub, on public TanStack/router pages, dark theme, steps
+named from the file structure. Merge markers need a signed-in GitHub session, so for screenshot 2 the script
+fills in the list's empty `user-login` tag and stubs the merge box answers in the service worker: the
+Conflicts, Can't rebase and Unresolved comments markers on those rows are simulated. Priority Review has no
+screenshot because GitHub serves the new Changes page, where it lives, only to signed-in users.
 
-## Release steps
+## Submit
 
-1. For a later release, bump `version` in `package.json` (the manifest takes it from there). The
-   first release ships as 0.1.0.
-2. `bun run typecheck && bun run check && bun run test`.
-3. `bun run build && bun run zip` → `.output/detent-for-github-<version>-chrome.zip`.
-4. In the dashboard: upload the zip; paste the full description, category and language; attach the
-   icon, promo tile and the five screenshots in the order above.
-5. Privacy practices tab: paste the single purpose statement, the permission justifications and
-   the remote code answer, tick the data categories and certifications above, and set the privacy
-   policy URL.
-6. Distribution: Unlisted for the first release. Submit for review.
-7. Tag the commit: `git tag v<version> && git push origin v<version>`.
+1. Sign in to the Chrome Web Store developer dashboard (https://chrome.google.com/webstore/devconsole) with
+   the developer account; pay the one-time registration fee and verify the contact email if not done yet.
+2. Build the package: `bun run build && bun run zip` gives `.output/detent-for-github-0.1.0-chrome.zip`.
+3. Add a new item and upload that zip.
+4. Store listing tab: paste the full description, set the category and language, upload the icon, the promo
+   tile and the five screenshots in the order above.
+5. Privacy practices tab: paste the single purpose, every permission justification and the remote code
+   answer, tick the data categories and the three certifications, and set the privacy policy URL
+   https://github.com/Mnigos/detent/blob/main/PRIVACY.md.
+6. Distribution tab: Public, all regions.
+7. Submit for review. After it is published, replace the store link placeholder in `README.md` and tag the
+   commit: `git tag v0.1.0 && git push origin v0.1.0`.
+
+For a later release, bump `version` in `package.json` (the manifest takes it from there), run
+`bun run typecheck && bun run check && bun run test`, then upload the new zip on the same item.
