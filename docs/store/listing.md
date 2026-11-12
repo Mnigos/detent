@@ -191,9 +191,8 @@ extension, in a fresh profile, signed out of GitHub, on public TanStack/router p
 named from the file structure. Merge markers need a signed-in GitHub session, so for screenshot 2 the script
 fills in the list's empty `user-login` tag and stubs the merge box answers in the service worker: the
 Conflicts, Can't rebase and Unresolved comments markers on those rows are simulated. The script blurs the
-pull request titles, numbers and authors in that shot, so the simulated states name no real pull request or
-person. Priority Review has no screenshot because GitHub serves the new Changes page, where it lives, only
-to signed-in users.
+pull request authors and their avatars in that shot, so the simulated states name no real person. Priority
+Review has no screenshot because GitHub serves the new Changes page, where it lives, only to signed-in users.
 
 ## Submit
 
