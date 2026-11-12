@@ -61,13 +61,14 @@ export const isFresh = (
 
 /**
  * Stats counted for the head commit the row shows are reused for a week; without a commit on either side, or after a
- * failure, for ten minutes. A different commit is always stale.
+ * failure, for ten minutes. A different commit is always stale, a failure for it too.
  */
 export function isStatsFresh(entry: StatsEntry | undefined, headSha?: string, now = Date.now()) {
 	if (!entry) return false
+	if (headSha && entry.headSha && entry.headSha !== headSha) return false
 	if ('failed' in entry || !headSha || !entry.headSha) return isFresh(entry, now)
 
-	return entry.headSha === headSha && now - entry.at < STATS_HEAD_TTL_MILLISECONDS
+	return now - entry.at < STATS_HEAD_TTL_MILLISECONDS
 }
 
 /** A conflict state is reused for ten minutes, unless the row now shows a head commit other than the one it was read for. */
