@@ -44,8 +44,8 @@ toolbar popup.
   for the head commit the page shows, taken from the diff detent already downloaded on Files changed
   or Changes, or downloaded once through the list queue and counted in the service worker, then
   stored for the list too. Large pull requests get them as well; the click only gates grouping.
-- **Image preview.** Clicking an image in a description or comment opens it over the page instead
-  of a new tab; arrow keys step through that comment's images. Cmd/Ctrl-click still opens the tab.
+- **Image preview.** Clicking an image in rendered Markdown on GitHub (descriptions, comments, README
+  files) opens it over the page instead of a new tab; arrow keys step through that block's images. Cmd/Ctrl-click still opens the tab.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. A model provider is optional and chosen in the popup:
