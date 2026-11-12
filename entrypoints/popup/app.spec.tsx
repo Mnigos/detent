@@ -80,6 +80,30 @@ const click = async (element: Element | undefined) => {
 	})
 }
 
+describe('switches', () => {
+	const checkbox = (label: string) =>
+		[...container.querySelectorAll('label')]
+			.find((element) => element.textContent?.includes(label))
+			?.querySelector<HTMLInputElement>('input[type="checkbox"]') ?? undefined
+
+	it('saves only the image preview switch when it is turned off', async () => {
+		await render(DEFAULT_SETTINGS)
+		const preview = checkbox('Preview images from descriptions and comments')
+		expect(preview?.checked).toBe(true)
+
+		await click(preview)
+
+		expect(writeSettings).toHaveBeenCalledExactlyOnceWith({ showImagePreview: false })
+		expect(preview?.checked).toBe(false)
+	})
+
+	it('shows the stored image preview switch off', async () => {
+		await render({ ...DEFAULT_SETTINGS, showImagePreview: false })
+
+		expect(checkbox('Preview images from descriptions and comments')?.checked).toBe(false)
+	})
+})
+
 describe('provider choice', () => {
 	it('shows the OpenRouter key and cost counter by default', async () => {
 		await render(DEFAULT_SETTINGS)
