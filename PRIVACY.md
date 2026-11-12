@@ -16,7 +16,8 @@ extension published in the Chrome Web Store and to builds from this repository.
   does not show the description (Files changed, Changes), it loads the pull request's conversation page
   from `github.com` once, with your GitHub session, to read it. It derives the review steps and the
   structural priorities from them. On a pull request with more than 300 changed files or 20,000 changed
-  lines it downloads nothing until you click its badge.
+  lines it groups nothing and asks no model until you click its badge; the header's lines of code
+  (below) still download the diff.
 - **Diff sizes on pull request lists.** On a repository's pull request list
   (`github.com/<owner>/<repo>/pulls`), the extension downloads the diff of each listed pull request
   on screen or one screen below the same way, three at a time across all tabs, and counts its added
@@ -49,7 +50,9 @@ extension published in the Chrome Web Store and to builds from this repository.
     the changed files and short diff excerpts;
   - for Priority Review, once it is shown on a pull request's Changes page: the pull request title
     and description, the changed file paths with their status (added, modified,
-    deleted, renamed) and line counts, and the same diff excerpts.
+    deleted, renamed) and line counts, and the same diff excerpts;
+  - when new commits change only part of a pull request it already grouped: also the earlier step
+    names and which of the files they held, so the model updates them instead of starting over.
 
   Without a provider no request leaves the browser for a model: the steps come from the file
   structure and the priorities from file paths and change sizes.
@@ -66,7 +69,8 @@ extension published in the Chrome Web Store and to builds from this repository.
 - **Viewed state and position.** Which files you marked as viewed is read from the GitHub page each
   time and not stored. Where you are in the review (the step, the file and its path) is kept in the
   browser's session storage for the current pull request.
-- **Image preview.** Clicking an image in a pull request description or comment shows it over the page.
+- **Image preview.** Clicking an image in rendered Markdown on github.com (pull request and issue
+  descriptions, comments, README files) shows it over the page.
   The preview uses the image the page already loaded, from the same address; it downloads, stores and
   sends nothing else. "Open original" opens the image's link in a new tab only when you click it.
 
@@ -101,10 +105,16 @@ Everything the extension stores stays in your browser's extension storage:
   extension's own IndexedDB database, which only detent's service worker opens. Pages you visit and
   detent's script on github.com cannot read it. While a sign-in is in progress the same database
   holds that attempt's state, nonce and PKCE verifier, deleted when OpenAI answers, and a short
-  notice for the popup, such as a failed sign-in or a reached usage limit. The access and refresh tokens never appear in a URL or a
-  log; the ID token and the email go only to OpenAI's sign-in page, as hints for the next sign-in.
+  notice for the popup, such as a failed sign-in or a reached usage limit. The access and refresh
+  tokens never appear in a URL or a log; the ID token and the email go only to OpenAI's sign-in page, as hints for the next sign-in.
 
 The extension has no server of its own. It sends nothing to the author or any analytics service.
+
+The use of information received through the extension adheres to the
+[Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq),
+including its Limited Use requirements. detent does not sell user data, does not use or transfer it for
+purposes unrelated to reviewing code on GitHub, and does not use it to determine creditworthiness or for
+lending.
 
 ## Third parties
 
@@ -121,7 +131,8 @@ The extension has no server of its own. It sends nothing to the author or any an
   `http://127.0.0.1:47801/auth/callback`, into detent's own callback page before the browser sends
   anything there.
 - `https://github.com/*`: reading pull request pages and pull request lists, rendering the review
-  steps, diff sizes and conflict markers in them, downloading diffs and reading merge box states.
+  steps, diff sizes and conflict markers in them, downloading diffs, reading merge box states and
+  pull request descriptions, and the image preview on any github.com page.
 - `https://patch-diff.githubusercontent.com/*`: following GitHub's redirect for those diff
   downloads.
 - `https://openrouter.ai/*`: the optional model requests to OpenRouter.
