@@ -6,7 +6,7 @@
 // 2. list: the pull request list with diff sizes and code lines. Conflict markers need a GitHub sign-in, so the
 //    list's empty user-login meta tag is filled in and the merge box answers are stubbed in the service worker, the
 //    way tooling/list-conflicts-e2e.mjs does: one row conflicts, one cannot be rebased, one has unresolved comments.
-//    Titles, numbers and authors are blurred, so the stubbed states point at no real pull request or person.
+//    Authors and their avatars are blurred, so the stubbed states point at no real person.
 // 3. header: a pull request's header with the code lines after GitHub's +additions −deletions.
 //    A label in the corner of the shot says the markers are illustrated.
 // 4. image preview: an image from a pull request description opened over the page.
@@ -177,13 +177,9 @@ async function list(page) {
 	await page.goto(LIST, { waitUntil: 'domcontentloaded' })
 	const markers = new Set([...rules.conflicts, ...rules.rebaseBlocked, ...rules.unresolved]).size
 	await page.waitForFunction(listIsReady, markers, { timeout: 90_000 })
-	// Blurs what names a real pull request or person; detent's stats and markers and GitHub's chrome stay sharp.
+	// Blurs the authors and their avatars, so the stubbed states name no real person; everything else stays sharp.
 	await page.addStyleTag({
-		content: `
-			li a[data-testid="listitem-title-link"],
-			li :has(> [data-testid="timestamp-container"]) > span:first-child,
-			li [data-testid="author-filter-link"],
-			li img { filter: blur(6px) }`,
+		content: 'li [data-testid="author-filter-link"], li img { filter: blur(6px) }',
 	})
 	await page.waitForTimeout(1500)
 	// The merge states are stubbed on real pull requests; the image says so itself, since the store has no captions.
