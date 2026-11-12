@@ -14,7 +14,10 @@ vi.mock('./lib/panel/large-pull-request', () => ({
 	largePullRequestGate: vi.fn(async () => undefined),
 	saveGroupingConsent: vi.fn(),
 }))
-vi.mock('./lib/panel/github-dom', () => ({ observeMutations: vi.fn() }))
+vi.mock('./lib/panel/github-dom', async (importOriginal) => ({
+	...(await importOriginal<typeof import('./lib/panel/github-dom')>()),
+	observeMutations: vi.fn(),
+}))
 vi.mock('./panel/mount', () => ({ startPanel: vi.fn(async () => undefined) }))
 vi.mock('./tree/mount', () => ({ startTree: vi.fn(async () => undefined) }))
 vi.mock('./list/mount', () => ({ startListStats: vi.fn(async () => undefined) }))
