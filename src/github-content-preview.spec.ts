@@ -16,7 +16,9 @@ vi.mock('./header/mount', () => ({ startHeaderStats: vi.fn(async () => undefined
 
 const SHOT = 'https://private-user-images.githubusercontent.com/1/a.png'
 const SETTINGS: Settings = {
+	provider: 'openrouter',
 	openRouterKey: '',
+	chatgptModel: '',
 	model: 'model',
 	isEnabled: false,
 	showListStats: true,
