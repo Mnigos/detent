@@ -6,7 +6,7 @@ export default defineConfig({
 	manifest: {
 		name: 'detent for GitHub',
 		description:
-			'Review GitHub pull requests in ordered layers, rank files by review risk, and see diff sizes on pull request lists.',
+			'Review GitHub pull requests in ordered layers, rank files by priority, and see diff sizes, code lines and conflicts on PR lists.',
 		host_permissions: [
 			'https://github.com/*',
 			'https://patch-diff.githubusercontent.com/*',
