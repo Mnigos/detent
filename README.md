@@ -2,6 +2,16 @@
 
 A Chrome extension for reviewing GitHub pull requests. Source: https://github.com/Mnigos/detent
 
+## Install
+
+- Chrome Web Store: link follows once the listing is published.
+- From source: see [Development](#development) and load `.output/chrome-mv3` unpacked.
+
+After installing, open a pull request on github.com. A model provider is optional; pick one in the
+toolbar popup.
+
+## Features
+
 - **Layers.** The changed files of a pull request are grouped into ordered review steps: a side
   panel on the classic "Files changed" page, a Layers mode in the file tree on the new Changes page.
   Keyboard: j/k files, n/p steps, Enter scroll, v viewed, r GitHub's order.
@@ -59,7 +69,7 @@ developer mode on and "Load unpacked". Open a pull request on GitHub and check t
 `[detent]` lines. `bun run test` runs the Vitest suite against the diffs in `fixtures/`,
 `bun run typecheck` runs the TypeScript compiler, `bun run check` runs Biome, and `bun run zip`
 packs the store upload. `node tooling/store-screenshots.mjs` captures the store screenshots after a
-build, and `node tooling/chatgpt-e2e.mjs` checks the ChatGPT sign-in headlessly up to OpenAI's token
+build, in headless Chromium with a fresh profile, signed out, and `node tooling/chatgpt-e2e.mjs` checks the ChatGPT sign-in headlessly up to OpenAI's token
 endpoint without signing in.
 
 ## ChatGPT sign-in
