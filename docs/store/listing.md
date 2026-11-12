@@ -27,7 +27,6 @@ Layers
 The changed files are grouped into review steps instead of one alphabetical list: the data shape first, then the code that implements it, then its tests and docs. Each step has a title and one sentence saying what to check, and counts how many of its files you marked as viewed. Files follow their dependencies, so you read definitions before callers.
 - On GitHub's new Changes page, the file tree gets a Layers | Priority | Files switch, section headers between the steps and a step badge in every sticky file header.
 - On the classic Files changed page, a side panel lists the steps and their files.
-- Steps whose files are all viewed are dimmed.
 - Keyboard: j and k move between files, n and p between steps, Enter scrolls to the file, v marks it as viewed, r switches to GitHub's own order.
 - A link to a review comment keeps that comment on screen while detent reorders the files, and makes its file the current one.
 
