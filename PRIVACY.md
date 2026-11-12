@@ -65,7 +65,7 @@ published in the Chrome Web Store and to builds from this repository.
 Everything the extension stores stays in your browser's extension storage:
 
 - your OpenRouter API key, the chosen provider, the chosen OpenRouter and ChatGPT models and the
-  two switches of the popup,
+  three switches of the popup,
 - cached step groupings, per pull request, model and diff revision, so a model is not asked twice
   for the same diff (the last five revisions of each pull request),
 - cached Priority Review rankings, per pull request, model and diff revision (the last five
