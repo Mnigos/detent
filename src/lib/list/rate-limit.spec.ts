@@ -30,6 +30,12 @@ describe('pauseLength', () => {
 		// GitHub's own wait is never cut short.
 		expect(pauseLength(1, 20 * 60_000)).toBe(20 * 60_000)
 	})
+
+	it('pauses for a minute when Retry-After asks for no wait or a past time', () => {
+		expect(pauseLength(1, 0)).toBe(DEFAULT_PAUSE_MILLISECONDS)
+		expect(pauseLength(1, -5_000)).toBe(DEFAULT_PAUSE_MILLISECONDS)
+		expect(pauseLength(2, 0)).toBe(2 * DEFAULT_PAUSE_MILLISECONDS)
+	})
 })
 
 describe('createRateLimitPause', () => {

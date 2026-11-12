@@ -41,15 +41,24 @@ export async function isRateLimitPaused(now = Date.now()) {
 	}
 }
 
-/** Retry-After, or a minute, doubled for every repeat up to ten minutes; a longer Retry-After always wins. */
-export const pauseLength = (strikes: number, retryAfterMilliseconds?: number) =>
-	Math.max(
-		retryAfterMilliseconds ?? 0,
+/**
+ * Retry-After, or a minute, doubled for every repeat up to ten minutes; a longer Retry-After always wins. A wait of zero
+ * or less (`Retry-After: 0`, a reset time the clock has passed) counts as none, so the limit still gets a pause.
+ */
+export function pauseLength(strikes: number, retryAfterMilliseconds?: number) {
+	const retryAfter =
+		retryAfterMilliseconds !== undefined && retryAfterMilliseconds > 0
+			? retryAfterMilliseconds
+			: undefined
+
+	return Math.max(
+		retryAfter ?? 0,
 		Math.min(
 			MAX_PAUSE_MILLISECONDS,
-			(retryAfterMilliseconds ?? DEFAULT_PAUSE_MILLISECONDS) * 2 ** (strikes - 1),
+			(retryAfter ?? DEFAULT_PAUSE_MILLISECONDS) * 2 ** (strikes - 1),
 		),
 	)
+}
 
 /**
  * The list's pause for GitHub rate limits, kept in `chrome.storage.local` so every tab honours it. `onResume` runs
