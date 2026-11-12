@@ -58,6 +58,14 @@ describe('isStatsFresh', () => {
 		expect(isStatsFresh({ ...entry(0), headSha: SHA_A }, SHA_B, 1)).toBe(false)
 	})
 
+	it('retries a failure at once when the row shows another head commit', () => {
+		const failure = { failed: true as const, at: 0, headSha: SHA_A }
+
+		expect(isStatsFresh(failure, SHA_B, 1)).toBe(false)
+		expect(isStatsFresh(failure, SHA_A, 1)).toBe(true)
+		expect(isStatsFresh(failure, undefined, 1)).toBe(true)
+	})
+
 	it('falls back on ten minutes when either side has no head commit, and for a failure', () => {
 		for (const [stored, headSha] of [
 			[entry(0), SHA_A],
