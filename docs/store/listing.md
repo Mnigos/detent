@@ -70,7 +70,7 @@ Source code (GPL-3.0): https://github.com/Mnigos/detent
 
 ## Permission justifications
 
-- **storage**: keeps the settings (provider, OpenRouter key, OpenRouter and ChatGPT models, two
+- **storage**: keeps the settings (provider, OpenRouter key, OpenRouter and ChatGPT models, three
   switches), cached step groupings and priority rankings per pull request revision, cached diff
   sizes and conflict states for pull request lists and headers, and local usage counters in the
   browser. Session storage holds the review position of the open pull request. ChatGPT tokens are
