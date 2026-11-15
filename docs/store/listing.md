@@ -174,25 +174,31 @@ Privacy policy URL: https://github.com/Mnigos/detent/blob/main/PRIVACY.md
 - Small promo tile 440×280: `docs/store/promo-440x280.png` (logo and name, no UI).
 - Screenshots 1280×800 PNG, in this order. The dashboard has no caption field; the text after each file
   says what it shows.
-  1. `docs/store/screenshot-1-layers-hide-tests.png`: "A pull request grouped into review steps, with test
-     files hidden."
-  2. `docs/store/screenshot-2-list-sizes-markers.png`: "Diff size, lines of code and merge state on every
+  1. `docs/store/signed-in-1-layers-hide-tests.png`: "A pull request on GitHub's Changes page grouped into
+     review steps, with test files hidden."
+  2. `docs/store/signed-in-2-priority.png`: "Priority Review ranks the changed files into Urgent, High,
+     Medium and Low."
+  3. `docs/store/screenshot-2-list-sizes-markers.png`: "Diff size, lines of code and merge state on every
      pull request in a list." The image carries a label saying its merge markers are illustrative and need a
      GitHub sign-in.
-  3. `docs/store/screenshot-3-header-code-lines.png`: "Lines of code next to GitHub's own count in the pull
+  4. `docs/store/screenshot-3-header-code-lines.png`: "Lines of code next to GitHub's own count in the pull
      request header."
-  4. `docs/store/screenshot-4-image-preview.png`: "Images from descriptions and comments open over the
-     page."
-  5. `docs/store/screenshot-5-popup.png`: "Pick OpenRouter or your ChatGPT plan to name the steps, or use
+  5. `docs/store/signed-in-3-popup.png`: "Pick OpenRouter or your ChatGPT plan to name the steps, or use
      neither."
 
-`bun run build && node tooling/store-screenshots.mjs` captures all five in headless Chromium with the built
-extension, in a fresh profile, signed out of GitHub, on public TanStack/router pages, dark theme, steps
-named from the file structure. Merge markers need a signed-in GitHub session, so for screenshot 2 the script
-fills in the list's empty `user-login` tag and stubs the merge box answers in the service worker: the
-Conflicts, Can't rebase and Unresolved comments markers on those rows are simulated. The script blurs the
-pull request authors and their avatars in that shot, so the simulated states name no real person. Priority
-Review has no screenshot because GitHub serves the new Changes page, where it lives, only to signed-in users.
+The three `signed-in-*` shots come from a signed-in browser on GitHub's new Changes page (TanStack/router#8170),
+where detent's Layers, Priority and Hide tests live inside GitHub's own file tree, cropped to 1280×800. They
+can't be captured headless, because GitHub sends signed-out visitors to the classic Files changed page.
+
+`bun run build && node tooling/store-screenshots.mjs` captures the signed-out set (`screenshot-*.png`) in
+headless Chromium with the built extension, in a fresh profile, signed out of GitHub, on public
+TanStack/router pages, dark theme, steps named from the file structure. On the classic Files changed page
+detent shows its side panel instead of the tree integration, so `screenshot-1` and `screenshot-5` are kept
+only as the classic-page view and are not uploaded. Merge markers need a signed-in GitHub session, so for
+`screenshot-2` the script fills in the list's empty `user-login` tag and stubs the merge box answers in the
+service worker: the Conflicts, Can't rebase and Unresolved comments markers on those rows are simulated. The
+script blurs the pull request authors and their avatars in that shot, so the simulated states name no real
+person. `screenshot-4-image-preview.png` is not uploaded, to keep the store's five slots for the review views.
 
 ## Submit
 
