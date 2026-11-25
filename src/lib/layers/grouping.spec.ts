@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Skeleton } from './build-skeleton'
+import { buildSkeleton, type Skeleton } from './build-skeleton'
 import { applyGrouping, GROUPING_SCHEMA, parseGroupingResponse } from './grouping'
 
 const CONTRACT = 'packages/contracts/import.contract.ts'
@@ -193,6 +193,28 @@ describe('applyGrouping', () => {
 		])
 
 		expect(pathsOf(layers)).toEqual([[CONTRACT, SCHEMA, SERVICE, SPEC, PAGE], [LOCK]])
+	})
+
+	it('keeps config out of Generated when a cached grouping predates the Config layer', () => {
+		const gate = 'scripts/security/workflowGates.mjs'
+		const workflows = ['.github/workflows/ludus-components.yml', '.github/workflows/ludus-web.yml']
+		const files = [gate, ...workflows, LOCK].map((path) => ({
+			path,
+			status: 'added' as const,
+			isBinary: false,
+			additions: 1,
+			deletions: 0,
+			hunks: [],
+		}))
+		// An old answer that left the workflows out entirely.
+		const layers = applyGrouping(buildSkeleton(files, []), [entry('Add workflow gates', gate)])
+
+		expect(layers?.map((layer) => [layer.name, layer.isTrailing])).toEqual([
+			['Add workflow gates', false],
+			['Unassigned changes', false],
+			['Generated', true],
+		])
+		expect(pathsOf(layers)).toEqual([[gate], workflows, [LOCK]])
 	})
 
 	it.each(['command', 'query'])(
