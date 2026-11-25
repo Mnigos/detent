@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://github.com/example/shop/pull/1/files"}
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { browser } from 'wxt/browser'
 import githubContent from '../entrypoints/github.content'
 import { takeOwnHash } from './lib/panel/github-dom'
 import { largePullRequestGate, saveGroupingConsent } from './lib/panel/large-pull-request'
@@ -28,6 +29,7 @@ const SETTINGS: Settings = {
 	isEnabled: true,
 	showListStats: true,
 	showImagePreview: true,
+	doubleClickViewed: false,
 }
 const groupButton = () => document.querySelector<HTMLButtonElement>('#detent-group')
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -84,6 +86,45 @@ describe('large pull request button', () => {
 			expect.any(Function),
 		)
 		expect(groupButton()).not.toBeNull()
+	})
+})
+
+describe('settings changes', () => {
+	const change = (newValue: Partial<Settings>) => {
+		const listener = vi.mocked(browser.storage.onChanged.addListener).mock.calls[0]?.[0] as (
+			changes: object,
+			area: string,
+		) => void
+		vi.mocked(readSettings).mockResolvedValue({ ...SETTINGS, ...newValue })
+		listener({ settings: { oldValue: SETTINGS, newValue: { ...SETTINGS, ...newValue } } }, 'local')
+	}
+
+	beforeEach(() => {
+		vi.mocked(largePullRequestGate).mockResolvedValue(undefined)
+	})
+
+	it('keeps the mounted view when only the double-click switch changes', async () => {
+		githubContent.main({} as never)
+		await flush()
+		expect(startPanel).toHaveBeenCalledOnce()
+
+		change({ doubleClickViewed: true })
+		await flush()
+		change({ doubleClickViewed: false })
+		await flush()
+
+		expect(startPanel).toHaveBeenCalledOnce()
+		expect(largePullRequestGate).toHaveBeenCalledOnce()
+	})
+
+	it('starts the view again when a setting it depends on changes', async () => {
+		githubContent.main({} as never)
+		await flush()
+
+		change({ model: 'other/model' })
+		await flush()
+
+		expect(startPanel).toHaveBeenCalledTimes(2)
 	})
 })
 

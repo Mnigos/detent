@@ -19,6 +19,8 @@ export interface Settings {
 	showListStats: boolean
 	/** Clicking an image in a description or comment opens it over the page, not in a new tab. */
 	showImagePreview: boolean
+	/** Double-clicking a file in a pull request flips GitHub's own Viewed control. Off unless chosen. */
+	doubleClickViewed: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	isEnabled: true,
 	showListStats: true,
 	showImagePreview: true,
+	doubleClickViewed: false,
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string'
@@ -47,6 +50,7 @@ export async function readSettings(): Promise<Settings> {
 		isEnabled: stored?.isEnabled !== false,
 		showListStats: stored?.showListStats !== false,
 		showImagePreview: stored?.showImagePreview !== false,
+		doubleClickViewed: stored?.doubleClickViewed === true,
 	}
 }
 
