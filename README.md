@@ -4,7 +4,7 @@ A Chrome extension for reviewing GitHub pull requests. Source: https://github.co
 
 ## Install
 
-- Chrome Web Store: link follows once the listing is published.
+- Chrome Web Store: https://chromewebstore.google.com/detail/lpkehpepojeoceajgmhajekfjcjfkcob
 - From source: see [Development](#development) and load `.output/chrome-mv3` unpacked.
 
 After installing, open a pull request on github.com. A model provider is optional; pick one in the
