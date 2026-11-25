@@ -46,6 +46,13 @@ toolbar popup.
   stored for the list too. Large pull requests get them as well; the click only gates grouping.
 - **Image preview.** Clicking an image in rendered Markdown on GitHub (descriptions, comments, README
   files) opens it over the page instead of a new tab; arrow keys step through that block's images. Cmd/Ctrl-click still opens the tab.
+- **Double-click to mark viewed.** Off by default. When switched on in the popup, double-clicking a
+  file on the Changes page or the classic Files changed page (its header, a diff line or the empty
+  part of its box) flips GitHub's own Viewed checkbox, as `v` does, so GitHub's counters and detent's
+  follow. Links, buttons, form fields, review threads and comment boxes keep their own double-click.
+  The word a double-click selects is cleared again; a selection made before is kept. When GitHub
+  collapses the viewed file, its header comes back under the sticky bar. It works with grouping on
+  or off.
 
 The extension fetches each pull request's unified diff, classifies the changed files by role and
 derives dependency edges from the added lines. A model provider is optional and chosen in the popup:
@@ -56,8 +63,9 @@ Without a provider the steps come from the file structure and the priorities fro
 size heuristic. On a pull request with more than 300 changed files
 or 20,000 changed lines, detent waits until you click its corner badge before it fetches the diff,
 and remembers that click for the pull request until the browser session ends. The popup also holds
-three switches, one to turn detent off except for the image preview, one for the list diff sizes
-and conflicts and the header's lines of code, and one for the image preview, and a usage counter. See
+four switches, one to turn detent off except for the image preview and the double-click, one for
+the list diff sizes and conflicts and the header's lines of code, one for the image preview and one
+for double-click to mark viewed, and a usage counter. See
 `PRIVACY.md` for what leaves the browser and `docs/store/listing.md` for the Chrome Web Store
 material and release steps.
 

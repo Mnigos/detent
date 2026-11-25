@@ -28,6 +28,7 @@ The changed files are grouped into review steps instead of one alphabetical list
 - On GitHub's new Changes page, the file tree gets a Layers | Priority | Files switch, section headers between the steps and a step badge in every sticky file header.
 - On the classic Files changed page, a side panel lists the steps and their files.
 - Keyboard: j and k move between files, n and p between steps, Enter scrolls to the file, v marks it as viewed, r switches to GitHub's own order.
+- Optional, off by default: double-click a file (its header, a diff line or the empty part of its box) to mark it as viewed, on either page. Links, buttons, form fields and review comments keep their own double-click.
 - A link to a review comment keeps that comment on screen while detent reorders the files, and makes its file the current one.
 
 Priority Review
@@ -49,7 +50,7 @@ Image preview
 Clicking an image in rendered Markdown on GitHub (pull request and issue descriptions, comments, README files) opens it over the page instead of in a new tab. Arrow keys step through the images of that block. Cmd/Ctrl-click still opens the tab.
 
 Model provider (optional)
-In the popup, choose OpenRouter and paste your API key, or choose ChatGPT and sign in with your ChatGPT account to use your ChatGPT plan. The model then names and orders the steps and ranks the files for Priority Review. Answers are cached in the browser per pull request, provider, model and diff revision. Without a provider, the steps come from the file structure and the priorities from file paths and change sizes, computed in the browser. The popup shows what your OpenRouter requests cost so far, or how many requests went to your ChatGPT plan, and has three switches: detent on or off, list and header sizes, and the image preview.
+In the popup, choose OpenRouter and paste your API key, or choose ChatGPT and sign in with your ChatGPT account to use your ChatGPT plan. The model then names and orders the steps and ranks the files for Priority Review. Answers are cached in the browser per pull request, provider, model and diff revision. Without a provider, the steps come from the file structure and the priorities from file paths and change sizes, computed in the browser. The popup shows what your OpenRouter requests cost so far, or how many requests went to your ChatGPT plan, and has four switches: detent on or off, list and header sizes, the image preview, and double-click to mark a file viewed.
 
 What leaves the browser
 detent downloads diffs and merge box states from GitHub with your GitHub session. Only when you set up a provider, the title, description, changed file paths and diff excerpts of the pull request you open go to OpenRouter under your key, or to OpenAI under your ChatGPT account. When new commits change only part of a pull request, the request also carries the earlier step names and which files they held. List sizes and merge states never go to a model. There is no detent server and no analytics.
@@ -71,7 +72,7 @@ headers, and opens screenshots and other images from GitHub descriptions and com
 storage
 
 : Keeps, in `chrome.storage.local`, the settings (provider, OpenRouter key, OpenRouter and ChatGPT model,
-  the three popup switches), the Hide tests choice, cached step groupings and priority rankings per pull
+  the four popup switches), the Hide tests choice, cached step groupings and priority rankings per pull
   request and diff revision, cached diff sizes and merge states for lists and headers, GitHub rate-limit
   pauses, and the local usage counters. `chrome.storage.session` holds the review position on an open pull
   request and the click that lets a large pull request be grouped, until the browser closes. ChatGPT tokens
@@ -90,7 +91,8 @@ declarativeNetRequestWithHostAccess
 Host `https://github.com/*`
 
 : The content script runs on github.com and renders the steps, Priority Review, Hide tests, list sizes,
-  conflict markers, header code lines and the image preview inside GitHub's pages. It matches the whole site
+  conflict markers, header code lines and the image preview inside GitHub's pages, and, when that switch
+  is on, turns a double-click on a pull request's file into a click on GitHub's Viewed checkbox. It matches the whole site
   because GitHub moves between pages without reloading, so a script matched only on `/pull/` or `/pulls`
   pages would never start. Elsewhere it watches the URL, and it handles clicks on images in rendered
   Markdown for the image preview. The service worker downloads
@@ -156,8 +158,8 @@ Tick these categories:
   head commit), and session storage keeps your review position on each. All of it stays in the browser.
 
 Leave unticked: health, financial and payment information, personal communications, location, user
-activity. detent reads keyboard shortcuts and clicks on its own controls to act on them; it does not log
-them, and it keeps no record of clicks, keystrokes, scrolling or mouse movement beyond the review position
+activity. detent reads keyboard shortcuts, clicks on its own controls and, when that switch is on,
+double-clicks on a pull request's files to act on them; it does not log them, and it keeps no record of clicks, keystrokes, scrolling or mouse movement beyond the review position
 above.
 
 Tick all three certifications:

@@ -40,8 +40,8 @@ extension published in the Chrome Web Store and to builds from this repository.
   read for. No comment or thread content is read. Signed out it asks nothing.
   The "Show diff size and conflicts on pull request lists, and code lines in pull request headers"
   switch in the popup turns these and the header's lines of code off. The "Group pull request files into
-  layers" switch turns detent off on GitHub's pages, except for the image preview, which has its own
-  switch; then detent sends no request for the pages you visit.
+  layers" switch turns detent off on GitHub's pages, except for the image preview and the double-click
+  to mark viewed, which have their own switches; then detent sends no request for the pages you visit.
 - **Model requests.** Only if you set up a model provider in the popup, requests go directly from
   your browser to that provider: to `openrouter.ai` with your OpenRouter API key, or to
   `api.openai.com` under your ChatGPT account when you chose ChatGPT and signed in. Each request
@@ -73,13 +73,17 @@ extension published in the Chrome Web Store and to builds from this repository.
   descriptions, comments, README files) shows it over the page.
   The preview uses the image the page already loaded, from the same address; it downloads, stores and
   sends nothing else. "Open original" opens the image's link in a new tab only when you click it.
+- **Double-click to mark viewed.** Off unless you turn it on in the popup. A double-click on a file
+  of a pull request clicks GitHub's own Viewed checkbox for that file, which GitHub saves as it does
+  for your own click. detent itself sends, stores and records nothing about the double-click.
 
 ## What is stored, and where
 
 Everything the extension stores stays in your browser's extension storage:
 
 - your OpenRouter API key, the chosen provider, the chosen OpenRouter and ChatGPT models and the
-  three switches of the popup,
+  four switches of the popup (detent on or off, list and header sizes, the image preview, double-click
+  to mark viewed),
 - cached step groupings, per pull request, model and diff revision, so a model is not asked twice
   for the same diff (the last five revisions of each pull request),
 - cached Priority Review rankings, per pull request, model and diff revision (the last five
