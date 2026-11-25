@@ -34,6 +34,7 @@ export function App({
 	const [isEnabled, setIsEnabled] = useState(settings.isEnabled)
 	const [showListStats, setShowListStats] = useState(settings.showListStats)
 	const [showImagePreview, setShowImagePreview] = useState(settings.showImagePreview)
+	const [doubleClickViewed, setDoubleClickViewed] = useState(settings.doubleClickViewed)
 	const isChatGpt = provider === 'chatgpt'
 
 	async function choose(next: ProviderChoice) {
@@ -56,6 +57,11 @@ export function App({
 	async function toggleImagePreview(next: boolean) {
 		setShowImagePreview(next)
 		await writeSettings({ showImagePreview: next })
+	}
+
+	async function toggleDoubleClickViewed(next: boolean) {
+		setDoubleClickViewed(next)
+		await writeSettings({ doubleClickViewed: next })
 	}
 
 	async function reset() {
@@ -94,6 +100,15 @@ export function App({
 					onChange={(event) => void toggleImagePreview(event.target.checked)}
 				/>
 				Preview images from descriptions and comments on the page
+			</label>
+			<label className="flex items-center gap-2 text-neutral-300 text-sm">
+				<input
+					type="checkbox"
+					disabled={isLoading}
+					checked={doubleClickViewed}
+					onChange={(event) => void toggleDoubleClickViewed(event.target.checked)}
+				/>
+				Double-click a file to mark it viewed
 			</label>
 			<fieldset className="flex flex-col gap-1">
 				<legend className="mb-1 text-neutral-400 text-xs">Model provider</legend>

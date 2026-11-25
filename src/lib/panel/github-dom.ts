@@ -115,8 +115,13 @@ export const readViewedPaths = (): ReadonlySet<string> =>
 			.map(({ path }) => path),
 	)
 
+/** GitHub's own Viewed checkbox in a classic file section; clicking it is what marks the file. */
+export const viewedCheckbox = (section: ParentNode) =>
+	section.querySelector<HTMLInputElement>(VIEWED_CHECKBOX) ?? undefined
+
 export function toggleViewed(path: string, anchorId: string): boolean {
-	const checkbox = findFileSection(path, anchorId)?.querySelector<HTMLInputElement>(VIEWED_CHECKBOX)
+	const section = findFileSection(path, anchorId)
+	const checkbox = section && viewedCheckbox(section)
 	if (!checkbox) return false
 
 	checkbox.click()

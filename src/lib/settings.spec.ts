@@ -16,6 +16,7 @@ describe('readSettings', () => {
 			isEnabled: true,
 			showListStats: true,
 			showImagePreview: true,
+			doubleClickViewed: false,
 		})
 	})
 
@@ -32,6 +33,7 @@ describe('readSettings', () => {
 			isEnabled: true,
 			showListStats: true,
 			showImagePreview: true,
+			doubleClickViewed: false,
 		})
 	})
 
@@ -46,6 +48,7 @@ describe('readSettings', () => {
 			isEnabled: true,
 			showListStats: true,
 			showImagePreview: true,
+			doubleClickViewed: false,
 		})
 	})
 
@@ -65,6 +68,14 @@ describe('readSettings', () => {
 		expect((await readSettings()).showImagePreview).toBe(true)
 		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { showImagePreview: false } })
 		expect((await readSettings()).showImagePreview).toBe(false)
+	})
+
+	it('marks files viewed on a double-click only when the stored flag says true', async () => {
+		expect((await readSettings()).doubleClickViewed).toBe(false)
+		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { doubleClickViewed: 'yes' } })
+		expect((await readSettings()).doubleClickViewed).toBe(false)
+		await fakeBrowser.storage.local.set({ [SETTINGS_KEY]: { doubleClickViewed: true } })
+		expect((await readSettings()).doubleClickViewed).toBe(true)
 	})
 })
 
@@ -100,6 +111,7 @@ describe('writeSettings', () => {
 			isEnabled: true,
 			showListStats: true,
 			showImagePreview: true,
+			doubleClickViewed: false,
 		}
 		await expect(writeSettings({ model: 'anthropic/claude-sonnet-5' })).resolves.toEqual(expected)
 		await expect(fakeBrowser.storage.local.get(SETTINGS_KEY)).resolves.toEqual({

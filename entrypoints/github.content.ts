@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser'
+import { startDoubleClickViewed } from '@/src/double-click/mount'
 import { startHeaderStats } from '@/src/header/mount'
 import { startImagePreview } from '@/src/image-preview/mount'
 import { closeImagePreview } from '@/src/image-preview/overlay'
@@ -57,6 +58,7 @@ export default defineContentScript({
 		let isFirstPass = true
 		// Read with the other settings on every sync; a click has to decide before any await.
 		let previewsImages = false
+		let marksViewedOnDoubleClick = false
 
 		// The header's code lines live per pull request, across its tabs, beside whichever view the tab has.
 		let header: { mount: () => void; remove: () => void } | undefined
@@ -103,10 +105,11 @@ export default defineContentScript({
 			const location = parsePullRequestUrl(window.location.href)
 			const list = parsePullsListUrl(window.location.href)
 			const settings = await readSettings()
-			const { isEnabled, showListStats, showImagePreview } = settings
+			const { isEnabled, showListStats, showImagePreview, doubleClickViewed } = settings
 			void syncHeader(settings)
-			// The preview has its own switch; the main one only covers layers and list stats.
+			// These two have their own switches; the main one only covers layers and list stats.
 			previewsImages = showImagePreview
+			marksViewedOnDoubleClick = doubleClickViewed
 			if (!previewsImages) closeImagePreview()
 			const view = !isEnabled
 				? undefined
@@ -192,15 +195,21 @@ export default defineContentScript({
 		}
 
 		startImagePreview(() => previewsImages)
+		startDoubleClickViewed(() => marksViewedOnDoubleClick)
 		void sync()
 		// Switching the extension off or on in the popup applies to open pages at once.
 		browser.storage.onChanged.addListener((changes, area) => {
 			if (area !== 'local' || !changes.settings) return
 
-			// The image preview switch needs no new page view; sync() still applies it before its early return.
-			const withoutPreview = (value: unknown) =>
-				JSON.stringify({ ...(value as Partial<Settings>), showImagePreview: undefined })
-			if (withoutPreview(changes.settings.oldValue) !== withoutPreview(changes.settings.newValue))
+			// The image preview and double-click switches need no new page view; sync() still applies
+			// them before its early return.
+			const withoutPageless = (value: unknown) =>
+				JSON.stringify({
+					...(value as Partial<Settings>),
+					showImagePreview: undefined,
+					doubleClickViewed: undefined,
+				})
+			if (withoutPageless(changes.settings.oldValue) !== withoutPageless(changes.settings.newValue))
 				mounted = undefined
 			void sync()
 		})

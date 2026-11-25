@@ -97,6 +97,23 @@ describe('switches', () => {
 		expect(preview?.checked).toBe(false)
 	})
 
+	it('shows the double-click switch off by default and saves only it when turned on', async () => {
+		await render(DEFAULT_SETTINGS)
+		const doubleClick = checkbox('Double-click a file to mark it viewed')
+		expect(doubleClick?.checked).toBe(false)
+
+		await click(doubleClick)
+
+		expect(writeSettings).toHaveBeenCalledExactlyOnceWith({ doubleClickViewed: true })
+		expect(doubleClick?.checked).toBe(true)
+	})
+
+	it('shows the stored double-click switch on', async () => {
+		await render({ ...DEFAULT_SETTINGS, doubleClickViewed: true })
+
+		expect(checkbox('Double-click a file to mark it viewed')?.checked).toBe(true)
+	})
+
 	it('shows the stored image preview switch off', async () => {
 		await render({ ...DEFAULT_SETTINGS, showImagePreview: false })
 

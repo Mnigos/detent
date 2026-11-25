@@ -23,6 +23,7 @@ const SETTINGS: Settings = {
 	isEnabled: false,
 	showListStats: true,
 	showImagePreview: true,
+	doubleClickViewed: false,
 }
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
