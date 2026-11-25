@@ -166,6 +166,8 @@ export function buildSkeleton(files: DiffFile[], edges: Edge[], cochange: Edge[]
 		homeless('config'),
 	].filter(Boolean).length
 	// Merging follows imports and directories only: shared identifiers would pull every behavior into one layer.
+	// Code keeps one layer even when the role layers take the whole budget, so a tiny pull request mixing
+	// every role can end one or two layers over it rather than folding unrelated roles together.
 	const merged = nameDrafts([
 		...leading,
 		...mergeToBudget(ordered, edges, Math.max(1, maxLayers - reserved)),
