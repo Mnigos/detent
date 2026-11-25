@@ -202,20 +202,49 @@ service worker: the Conflicts, Can't rebase and Unresolved comments markers on t
 script blurs the pull request authors and their avatars in that shot, so the simulated states name no real
 person. `screenshot-4-image-preview.png` is not uploaded, to keep the store's five slots for the review views.
 
-## Submit
+## Release
 
-1. Sign in to the Chrome Web Store developer dashboard (https://chrome.google.com/webstore/devconsole) with
-   the developer account; pay the one-time registration fee and verify the contact email if not done yet.
-2. Build the package: `bun run build && bun run zip` gives `.output/detent-for-github-0.1.0-chrome.zip`.
-3. Add a new item and upload that zip.
-4. Store listing tab: paste the full description, set the category and language, upload the icon, the promo
-   tile and the five screenshots in the order above.
-5. Privacy practices tab: paste the single purpose, every permission justification and the remote code
-   answer, tick the data categories and the three certifications, and set the privacy policy URL
-   https://github.com/Mnigos/detent/blob/main/PRIVACY.md.
-6. Distribution tab: Public, all regions.
-7. Submit for review. After it is published, replace the store link placeholder in `README.md` and tag the
-   commit: `git tag v0.1.0 && git push origin v0.1.0`.
+The item is on the store (ID `lpkehpepojeoceajgmhajekfjcjfkcob`). The Release workflow
+(`.github/workflows/release.yml`) ships each new version: a pushed `v*` tag builds and tests the
+extension, uploads the zip through Chrome Web Store API v2, submits it for review, and attaches the zip to
+a GitHub release for sideloading. Listing text, screenshots and the privacy tab stay manual in the
+dashboard.
 
-For a later release, bump `version` in `package.json` (the manifest takes it from there), run
-`bun run typecheck && bun run check && bun run test`, then upload the new zip on the same item.
+### One-time setup
+
+1. Open https://console.cloud.google.com/projectcreate, name the project (for example `detent-release`)
+   and click Create.
+2. Open https://console.cloud.google.com/apis/library/chromewebstore.googleapis.com with that project
+   selected and click Enable on "Chrome Web Store API".
+3. Go to IAM & Admin → Service Accounts → Create service account. Name it `cws-release`, click Create and
+   continue, skip the roles, click Done.
+4. Open the new service account → Keys → Add key → Create new key → JSON → Create. The browser downloads
+   the key file.
+5. In the developer dashboard (https://chrome.google.com/webstore/devconsole) open Account, paste the
+   service account's email (`client_email` in the key file, ending in `.iam.gserviceaccount.com`) into the
+   service account field and save. A publisher can have one service account.
+6. Copy the publisher ID from the dashboard's Publisher → Settings section, or from the dashboard URL
+   `https://chrome.google.com/webstore/devconsole/<publisher-id>`.
+7. Store the values in the repository, then delete the key file:
+
+   ```sh
+   gh secret set CWS_SERVICE_ACCOUNT_JSON --repo Mnigos/detent < ~/Downloads/<key-file>.json
+   gh secret set CWS_PUBLISHER_ID --repo Mnigos/detent --body '<publisher-id>'
+   gh variable set CWS_EXTENSION_ID --repo Mnigos/detent --body lpkehpepojeoceajgmhajekfjcjfkcob
+   rm ~/Downloads/<key-file>.json
+   ```
+
+8. Check the setup with a dry run, which signs in and reads the item's status but uploads nothing:
+   `gh workflow run release.yml --repo Mnigos/detent --ref main -f dry_run=true`, then
+   `gh run watch --repo Mnigos/detent`.
+
+### Each release
+
+1. In a pull request, bump `version` in `package.json` (the manifest takes it from there). Merge it.
+2. Tag the merge commit and push the tag:
+   `git fetch origin && git tag vX.Y.Z <sha> && git push origin vX.Y.Z`.
+3. Watch the run: `gh run watch --repo Mnigos/detent`. It stops before uploading when the tag differs
+   from `package.json`, a review is still pending, or the store already has that version. The store
+   publishes the version once the review passes.
+4. If the store step failed, fix the cause and click "Re-run failed jobs" on the run, or run
+   `gh workflow run release.yml --repo Mnigos/detent --ref vX.Y.Z -f dry_run=false`.
