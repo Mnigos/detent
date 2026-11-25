@@ -1,19 +1,24 @@
 // Loads the built extension into Chromium and exercises the panel on a public pull request.
 // Usage: bun tooling/panel-e2e.mjs [pull request files url]
 // With OPENROUTER_KEY set it seeds the settings first and waits for the model labels.
-import { mkdirSync, mkdtempSync } from 'node:fs'
+// Screenshots go to a fresh temp directory; SCREENSHOTS=docs writes them to docs/screenshots.
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 
 const extensionPath = join(import.meta.dirname, '..', '.output', 'chrome-mv3')
 const url = process.argv[2] ?? 'https://github.com/Mnigos/tessera/pull/165/files'
-const screenshots = join(import.meta.dirname, '..', 'docs', 'screenshots')
+const screenshots =
+	process.env.SCREENSHOTS === 'docs'
+		? join(import.meta.dirname, '..', 'docs', 'screenshots')
+		: mkdtempSync(join(tmpdir(), 'detent-e2e-screenshots-'))
 const openRouterKey = process.env.OPENROUTER_KEY
 const model = process.env.OPENROUTER_MODEL ?? 'openai/gpt-5.6-luna'
 mkdirSync(screenshots, { recursive: true })
 
-const context = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'detent-e2e-')), {
+const profile = mkdtempSync(join(tmpdir(), 'detent-e2e-'))
+const context = await chromium.launchPersistentContext(profile, {
 	channel: process.env.PROBE_CHANNEL || undefined,
 	executablePath: process.env.PROBE_EXECUTABLE || undefined,
 	headless: false,
@@ -25,9 +30,12 @@ const context = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir()
 	],
 })
 
+// Mirrors the footer lines in src/lib/panel/status.ts.
 const STATUS_LINES = [
 	/^Layer names from .+\.$/,
-	'Add an OpenRouter key in the extension popup to name the layers.',
+	/; layer names come from the file structure\.$/,
+	'Grouping the files with the model…',
+	'Set up a model provider in the extension popup to name the layers.',
 	'Layer names come from the file structure.',
 	'OpenRouter rejected the API key. Check it in the extension popup.',
 	'OpenRouter reports no credits left.',
@@ -76,6 +84,7 @@ try {
 	if (openRouterKey) {
 		const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
 		await worker.evaluate((settings) => chrome.storage.local.set({ settings }), {
+			provider: 'openrouter',
 			openRouterKey,
 			model,
 		})
@@ -105,14 +114,16 @@ try {
 
 	console.log('status line:', JSON.stringify(mounted.status))
 	if (openRouterKey) {
-		const expected = `Layer names from ${model}.`
+		// The line may end with the request cost: `Layer names from <model> · $0.01.`
+		const isLabeled = (status) =>
+			status === `Layer names from ${model}.` || status?.startsWith(`Layer names from ${model} · `)
 		const deadline = Date.now() + 30_000
 		let state = mounted
-		while (state.status !== expected && Date.now() < deadline) {
+		while (!isLabeled(state.status) && Date.now() < deadline) {
 			await page.waitForTimeout(1000)
 			state = await panelState(page)
 		}
-		if (state.status !== expected)
+		if (!isLabeled(state.status))
 			throw new Error(`OpenRouter labels did not arrive: ${JSON.stringify(state.status)}`)
 
 		console.log('model labels:')
@@ -140,6 +151,8 @@ try {
 	await page.waitForTimeout(300)
 	console.log('after backtick:', JSON.stringify(await panelState(page)))
 	await page.screenshot({ path: join(screenshots, 'e2e-04-collapsed.png') })
+	console.log('screenshots:', screenshots)
 } finally {
 	await context.close()
+	rmSync(profile, { recursive: true, force: true })
 }
