@@ -1,0 +1,130 @@
+# Releases detent on the Chrome Web Store when a version tag (v1.2.3) is pushed, and attaches the zip to a GitHub
+# release. Run it by hand with "dry run" ticked to build and check the store credentials without uploading.
+# One-time setup and the per-release steps: docs/store/listing.md, "Release".
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (build, test and check the store credentials; no upload, no GitHub release)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      zip: ${{ steps.zip.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+
+      - name: Check the tag matches package.json
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          expected="v$(jq -r .version package.json)"
+          if [ "$REF_TYPE" = tag ]; then
+            if [ "$REF_NAME" != "$expected" ]; then
+              echo "::error::Tag $REF_NAME does not match package.json, which is at $expected."
+              exit 1
+            fi
+          elif [ "$RELEASE_DRY_RUN" != true ]; then
+            echo "::error::A release runs only on a tag. Pick the tag under 'Use workflow from', or tick dry run."
+            exit 1
+          fi
+
+      - run: bun run typecheck
+      - run: bun run check
+      - run: bun run test
+      - run: bun run build && bun run zip
+
+      - name: Find the zip
+        id: zip
+        run: |
+          name="$(jq -r '.name + "-" + .version' package.json)-chrome.zip"
+          if [ ! -f ".output/$name" ]; then
+            echo "::error::wxt zip did not write .output/$name."
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: extension
+          path: .output/${{ steps.zip.outputs.name }}
+          if-no-files-found: error
+
+  store:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension
+          path: .output
+
+      - name: Upload to the Chrome Web Store and submit for review
+        env:
+          CWS_SERVICE_ACCOUNT_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_JSON }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+          ZIP: .output/${{ needs.build.outputs.zip }}
+        run: |
+          if [ "$RELEASE_DRY_RUN" = true ]; then
+            node tooling/cws-release.mjs "$ZIP" --dry-run
+          else
+            node tooling/cws-release.mjs "$ZIP"
+          fi
+
+  release:
+    needs: [build, store]
+    if: github.ref_type == 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension
+
+      - name: Attach the zip to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          ZIP: ${{ needs.build.outputs.zip }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" --title "$TAG" --generate-notes --verify-tag
+          fi
