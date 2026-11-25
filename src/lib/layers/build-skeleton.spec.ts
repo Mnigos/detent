@@ -3,6 +3,7 @@ import { loadFixture } from '../../test/load-fixture'
 import { type DiffFile, parseUnifiedDiff } from '../diff/parse-diff'
 import { buildSkeleton, type Skeleton } from './build-skeleton'
 import { buildCochangeEdges, buildEdges } from './graph'
+import { applyLabels } from './label-schema'
 
 const added = (path: string): DiffFile => ({
 	path,
@@ -62,17 +63,20 @@ describe('buildSkeleton', () => {
 	})
 
 	// tessera-165 changes no lockfile and no generated file, so the trailing layer is asserted here.
-	it('collects generated files and homeless docs in a trailing Generated layer', () => {
+	it('collects generated files in a trailing Generated layer and homeless docs in Docs changes', () => {
 		const { layers } = tanstack8170.skeleton
 		const last = layers.at(-1)
+		const docs = layers.at(-2)
 
 		expect(last?.fallbackName).toBe('Generated')
 		expect(last?.isTrailing).toBe(true)
 		expect(last?.files.map((file) => file.path)).toEqual([
-			'.changeset/solid-functions-flight.md',
 			'e2e/solid-start/server-functions/src/routeTree.gen.ts',
 			'pnpm-lock.yaml',
 		])
+		expect(docs?.fallbackName).toBe('Docs changes')
+		expect(docs?.isTrailing).toBe(false)
+		expect(docs?.files.map((file) => file.path)).toEqual(['.changeset/solid-functions-flight.md'])
 		expect(
 			layers.every(
 				(layer) =>
@@ -93,7 +97,8 @@ describe('buildSkeleton', () => {
 			['ssr · scenarios', 9],
 			['server-fn-transport · solid', 1],
 			['Tests', 2],
-			['Generated', 3],
+			['Docs changes', 1],
+			['Generated', 2],
 		])
 	})
 
@@ -246,9 +251,10 @@ describe('buildSkeleton', () => {
 	})
 
 	it('joins files through shared identifiers without chaining two behaviors together', () => {
+		// The changeset would take a reserved Docs slot and squeeze the code layers this test compares.
 		const files = parseUnifiedDiff(
 			['tessera-165', 'tessera-166', 'tanstack-router-8170'].map(loadFixture).join(''),
-		)
+		).filter((file) => !file.path.startsWith('.changeset/'))
 		const skeleton = buildSkeleton(files, buildEdges(files), buildCochangeEdges(files))
 		const withoutShared = buildSkeleton(files, buildEdges(files))
 		const service = 'apps/api/src/modules/repositories/application/repositories.service.ts'
@@ -265,5 +271,140 @@ describe('buildSkeleton', () => {
 
 	it('returns the edges it was given', () => {
 		expect(tessera165.skeleton.edges).toEqual(buildEdges(tessera165.files))
+	})
+
+	describe('config and docs no code layer claims', () => {
+		// The shape of ludus-engine/LudusPlatform#1001: workflow gates and the workflows that call them.
+		const workflowGates = [
+			'scripts/security/workflowGates.mjs',
+			'scripts/security/workflowGates.test.mjs',
+			'.github/workflows/ludus-components.yml',
+			'.github/workflows/ludus-instrumentation.yml',
+			'.github/workflows/ludus-web.yml',
+		]
+		const shapeOf = ({ layers }: Skeleton) =>
+			layers.map((layer) => [
+				layer.fallbackName,
+				layer.isTrailing,
+				layer.files.map((file) => file.path),
+			])
+
+		it('gives workflows next to unrelated code their own Config changes layer', () => {
+			expect(shapeOf(buildSkeleton(workflowGates.map(added), []))).toEqual([
+				[
+					'scripts · security',
+					false,
+					['scripts/security/workflowGates.mjs', 'scripts/security/workflowGates.test.mjs'],
+				],
+				[
+					'Config changes',
+					false,
+					[
+						'.github/workflows/ludus-components.yml',
+						'.github/workflows/ludus-instrumentation.yml',
+						'.github/workflows/ludus-web.yml',
+					],
+				],
+			])
+		})
+
+		it('still attaches config and docs that share two path segments with a code layer', () => {
+			const skeleton = buildSkeleton(
+				[
+					'apps/api/src/server.ts',
+					'apps/api/package.json',
+					'apps/api/README.md',
+					'apps/web/src/app.tsx',
+					'apps/web/vite.config.ts',
+				].map(added),
+				[],
+			)
+
+			expect(shapeOf(skeleton)).toEqual([
+				['api', false, ['apps/api/src/server.ts', 'apps/api/README.md', 'apps/api/package.json']],
+				['web', false, ['apps/web/src/app.tsx', 'apps/web/vite.config.ts']],
+			])
+		})
+
+		it('orders the role layers Tests, Docs, Config, Generated and only Generated trails', () => {
+			const skeleton = buildSkeleton(
+				[
+					'bun.lock',
+					'README.md',
+					'.github/workflows/ci.yml',
+					'src/lib/parse.ts',
+					'src/lib/__snapshots__/parse.spec.ts.snap',
+					'tests/smoke.spec.ts',
+				].map(added),
+				[],
+			)
+
+			expect(shapeOf(skeleton)).toEqual([
+				['Other changes', false, ['src/lib/parse.ts']],
+				['Tests', false, ['tests/smoke.spec.ts']],
+				['Docs changes', false, ['README.md']],
+				['Config changes', false, ['.github/workflows/ci.yml']],
+				['Generated', true, ['bun.lock', 'src/lib/__snapshots__/parse.spec.ts.snap']],
+			])
+		})
+
+		it('reserves budget slots for the Docs and Config layers', () => {
+			const code = ['alpha', 'beta', 'gamma', 'delta'].map((name) => `${name}/index.ts`)
+			const { layers, maxLayers } = buildSkeleton(
+				[...code, 'README.md', '.github/workflows/ci.yml'].map(added),
+				[],
+			)
+
+			expect(maxLayers).toBe(3)
+			expect(layers.filter((layer) => !layer.isTrailing)).toHaveLength(3)
+			expect(layers.map((layer) => layer.fallbackName).slice(-2)).toEqual([
+				'Docs changes',
+				'Config changes',
+			])
+		})
+
+		it('keeps one code layer when the role layers alone fill the budget', () => {
+			const paths = [
+				'packages/db/migrations/0001_init.sql',
+				'src/lib/parse.ts',
+				'tests/smoke.spec.ts',
+				'README.md',
+				'.github/workflows/ci.yml',
+			]
+			const { layers } = buildSkeleton(paths.map(added), [])
+
+			expect(layers.map((layer) => layer.fallbackName)).toEqual([
+				'Database migrations',
+				'Other changes',
+				'Tests',
+				'Docs changes',
+				'Config changes',
+			])
+			expect(layers.flatMap((layer) => layer.files.map((file) => file.path)).sort()).toEqual(
+				[...paths].sort(),
+			)
+		})
+
+		it('lets labels cached against the old Generated layer land on Config changes without loss', () => {
+			const skeleton = buildSkeleton(workflowGates.map(added), [])
+			const config = skeleton.layers.find((layer) => layer.fallbackName === 'Config changes')
+			const stale = { path: '.github/workflows/ludus-web.yml', toLayerId: 'deadbeef' }
+			// The old trailing layer held exactly the workflows, so its id is the Config layer's id now.
+			const labeled = applyLabels(skeleton, [
+				{
+					id: config?.id ?? '',
+					name: 'Gate workflows on security checks',
+					summary: 'Check each workflow calls the gate.',
+					moveFiles: [stale],
+					mergeIds: ['deadbeef'],
+				},
+				{ id: 'cafebabe', name: 'Gone', summary: 'A layer that no longer exists.' },
+			])
+
+			expect(labeled.map((layer) => [layer.name, layer.isTrailing, layer.files.length])).toEqual([
+				['scripts · security', false, 2],
+				['Gate workflows on security checks', false, 3],
+			])
+		})
 	})
 })

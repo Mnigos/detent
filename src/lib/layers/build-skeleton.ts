@@ -141,10 +141,6 @@ export function buildSkeleton(files: DiffFile[], edges: Edge[], cochange: Edge[]
 		remaining.delete(next)
 	}
 
-	// Migrations and tests no layer claims make their own layers, which the merge must count against the budget.
-	const testPaths = paths.filter((path) => roleOf(path) === 'test')
-	const reserved =
-		(testPaths.some((path) => !testOwner(ordered, path)) ? 1 : 0) + (migrations.length > 0 ? 1 : 0)
 	const leading: Draft[] =
 		migrations.length > 0
 			? [
@@ -156,16 +152,36 @@ export function buildSkeleton(files: DiffFile[], edges: Edge[], cochange: Edge[]
 					},
 				]
 			: []
+	// Merging regroups the cores but keeps every core path, so ownership is already known here.
+	const candidates = [...leading, ...ordered]
+	const isHomeless = (path: string) => (closestLayer(candidates, path)?.shared ?? 0) < 2
+	const homeless = (role: FileRole) =>
+		paths.some((path) => roleOf(path) === role && isHomeless(path))
+	// Migrations, tests, docs and config no layer claims make their own layers, which the merge must
+	// count against the budget.
+	const reserved = [
+		migrations.length > 0,
+		paths.some((path) => roleOf(path) === 'test' && !testOwner(candidates, path)),
+		homeless('docs'),
+		homeless('config'),
+	].filter(Boolean).length
 	// Merging follows imports and directories only: shared identifiers would pull every behavior into one layer.
-	const merged = nameDrafts([...leading, ...mergeToBudget(ordered, edges, maxLayers - reserved)])
+	const merged = nameDrafts([
+		...leading,
+		...mergeToBudget(ordered, edges, Math.max(1, maxLayers - reserved)),
+	])
 
-	const tests: Draft = { core: [], attached: [], rank: ROLE_RANK.test, name: ROLE_LAYER_NAMES.test }
-	const trailing: Draft = {
+	const roleDraft = (role: FileRole): Draft => ({
 		core: [],
 		attached: [],
-		rank: ROLE_RANK.generated,
-		name: ROLE_LAYER_NAMES.generated,
-	}
+		rank: ROLE_RANK[role],
+		name: ROLE_LAYER_NAMES[role],
+	})
+	const tests = roleDraft('test')
+	const docs = roleDraft('docs')
+	const config = roleDraft('config')
+	// Only generated files trail: they are folded and never reach the model.
+	const trailing = roleDraft('generated')
 	for (const path of paths) {
 		const role = roleOf(path)
 		if (!ATTACHED_AFTERWARDS.includes(role) || role === 'migration') continue
@@ -175,11 +191,18 @@ export function buildSkeleton(files: DiffFile[], edges: Edge[], cochange: Edge[]
 			continue
 		}
 		const closest = closestLayer(merged, path)
-		const target = role === 'generated' || !closest || closest.shared < 2 ? trailing : closest.draft
+		const target =
+			role === 'generated'
+				? trailing
+				: closest && closest.shared >= 2
+					? closest.draft
+					: role === 'docs'
+						? docs
+						: config
 		target.attached.push(path)
 	}
 
-	const layers = [...merged, tests, trailing]
+	const layers = [...merged, tests, docs, config, trailing]
 		.filter((draft) => draft.core.length + draft.attached.length > 0)
 		.map((draft) => {
 			const sorted = [...draft.core, ...draft.attached].sort(
